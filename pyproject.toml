@@ -1,0 +1,59 @@
+[build-system]
+requires = ["pdm-pep517>=1.0"]
+build-backend = "pdm.pep517.api"
+
+[project]
+name = "py-load-chemb"
+version = "0.1.0"
+description = "An open-source Python package for FDA SPL data loading"
+authors = [
+    {name = "Gowtham Rao", email = "rao@ohdsi.org"},
+]
+requires-python = ">=3.10"
+license = {text = "Apache-2.0"}
+dependencies = [
+    "lxml",
+    "requests",
+    "tenacity",
+    "pydantic>=2.0.0",
+    "typer[all]",
+]
+
+[project.optional-dependencies]
+postgresql = ["psycopg2-binary"]
+
+[project.scripts]
+py-load-chemb = "py_load_chemb.cli:app"
+
+[tool.pdm]
+[tool.pdm.dev-dependencies]
+dev = [
+    "pytest",
+    "pytest-cov",
+    "testcontainers",
+    "ruff",
+    "black",
+    "mypy",
+    "pre-commit",
+]
+
+[tool.ruff]
+line-length = 88
+select = ["E", "F", "I", "B", "C4", "UP"]
+ignore = []
+
+[tool.black]
+line-length = 88
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+strict = true
+
+[tool.pytest.ini_options]
+minversion = "6.0"
+addopts = "-ra -q"
+testpaths = [
+    "tests",
+]
