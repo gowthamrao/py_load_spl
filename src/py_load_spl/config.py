@@ -1,7 +1,6 @@
 import logging
-from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, HttpUrl
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
@@ -17,7 +16,7 @@ class DatabaseSettings(BaseSettings):
     user: str = "postgres"
     password: str = "postgres"
     name: str = "spl_data"
-    adapter: Literal["postgresql"] = "postgresql"
+    adapter: str = "postgresql"
 
 
 class Settings(BaseSettings):
@@ -26,6 +25,9 @@ class Settings(BaseSettings):
     db: DatabaseSettings = Field(default_factory=DatabaseSettings)
     log_level: str = "INFO"
     data_dir: str = "data"
+    # The FRD requires a configurable download source (F001.1)
+    fda_source_url: HttpUrl = "https://dailymed.nlm.nih.gov/dailymed/spl-resources-all-drug-labels.cfm"  # type: ignore
+    download_path: str = "data/downloads"
 
 
 def get_settings() -> Settings:
