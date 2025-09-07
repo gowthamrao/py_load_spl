@@ -1,14 +1,15 @@
 import logging
+import tempfile
 from pathlib import Path
 
 import typer
 from rich.console import Console
-from rich.pretty import pprint
 
 from . import __name__ as app_name
 from .config import get_settings
 from .db.postgres import PostgresLoader
 from .parsing import iter_spl_files
+from .transformation import Transformer
 
 app = typer.Typer(name=app_name)
 console = Console()
@@ -64,24 +65,37 @@ def init(ctx: typer.Context) -> None:
 def full_load(
     ctx: typer.Context,
     source: Path = typer.Option(
-        "data", help="Local path to SPL archives instead of downloading."
+        ..., help="Local path to the directory containing SPL XML files.", exists=True, file_okay=False, dir_okay=True, readable=True
     ),
 ) -> None:
     """
-    F008.3: Perform a full data load.
-    (Currently only demonstrates parsing from a local directory)
+    F008.3: Perform a full data load from a local directory.
     """
     console.print(f"[bold cyan]Starting full data load from '{source}'...[/bold cyan]")
 
-    # In a full implementation, this would be followed by transformation and loading.
-    # For now, we just demonstrate the parsing.
-    record_count = 0
-    for parsed_data in iter_spl_files(source):
-        console.print(f"--- Parsed Record (doc_id: {parsed_data.get('document_id')}) ---")
-        pprint(parsed_data)
-        record_count += 1
+    with tempfile.TemporaryDirectory() as temp_dir_str:
+        output_dir = Path(temp_dir_str)
+        console.print(f"Intermediate CSV files will be stored in: {output_dir}")
 
-    console.print(f"[bold cyan]Parsing complete. Found {record_count} records.[/bold cyan]")
+        # 1. Parsing
+        console.print("[cyan]Step 1: Parsing XML files...[/cyan]")
+        parsed_data_stream = iter_spl_files(source)
+
+        # 2. Transformation
+        console.print("[cyan]Step 2: Transforming data to CSV...[/cyan]")
+        transformer = Transformer(output_dir=output_dir)
+        transformer.transform_stream(parsed_data_stream)
+
+        console.print("[green]Parsing and Transformation complete.[/green]")
+
+        # 3. Loading (The next step in the implementation)
+        console.print("[yellow]Step 3: Loading data to database (not yet implemented).[/yellow]")
+        # TODO: Instantiate the DB loader
+        # TODO: Call loader.bulk_load_to_staging(output_dir)
+        # TODO: Call loader.merge_from_staging('full-load')
+        # etc.
+
+    console.print("[bold green]Full load process finished.[/bold green]")
 
 
 @app.command()
@@ -97,11 +111,6 @@ def delta_load(
     """
     console.print("[bold blue]Starting delta data load...[/bold blue]")
     console.print("[yellow]Note: Delta load is not yet implemented.[/yellow]")
-    # TODO:
-    # 1. Acquisition (with delta identification)
-    # 2. Parsing
-    # 3. Transformation
-    # 4. Loading (using merge/upsert)
     console.print("[bold blue]Delta data load complete.[/bold blue]")
 
 
