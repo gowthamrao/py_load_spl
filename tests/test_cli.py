@@ -1,4 +1,4 @@
-from py_load_chemb.cli import app
+from py_load_spl.cli import app
 from typer.testing import CliRunner
 
 runner = CliRunner()

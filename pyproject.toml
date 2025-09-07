@@ -3,7 +3,7 @@ requires = ["pdm-pep517>=1.0"]
 build-backend = "pdm.pep517.api"
 
 [project]
-name = "py-load-chemb"
+name = "py-load-spl"
 version = "0.1.0"
 description = "An open-source Python package for FDA SPL data loading"
 authors = [
@@ -23,7 +23,7 @@ dependencies = [
 postgresql = ["psycopg2-binary"]
 
 [project.scripts]
-py-load-chemb = "py_load_chemb.cli:app"
+py-load-spl = "py_load_spl.cli:app"
 
 [tool.pdm]
 [tool.pdm.dev-dependencies]
