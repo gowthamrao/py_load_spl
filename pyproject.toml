@@ -3,9 +3,9 @@ requires = ["pdm-pep517>=1.0"]
 build-backend = "pdm.pep517.api"
 
 [project]
-name = "py-load-spl"
+name = "py-load-faers"
 version = "0.1.0"
-description = "An open-source Python package for FDA SPL data loading"
+description = "An open-source Python package for FAERS data loading"
 authors = [
     {name = "Gowtham Rao", email = "rao@ohdsi.org"},
 ]
@@ -18,13 +18,14 @@ dependencies = [
     "pydantic>=2.0.0",
     "pydantic-settings",
     "typer[all]",
+    "tqdm",
 ]
 
 [project.optional-dependencies]
 postgresql = ["psycopg2-binary"]
 
 [project.scripts]
-py-load-spl = "py_load_spl.cli:app"
+py-load-faers = "py_load_faers.cli:app"
 
 [tool.pdm]
 [tool.pdm.dev-dependencies]

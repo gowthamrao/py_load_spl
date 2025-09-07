@@ -1,105 +1,98 @@
-import pytest
 from pathlib import Path
+import csv
 
-from py_load_spl.parsing import parse_spl_file
+import pytest
+
+from src.py_load_faers import parsing
+
+# Define synthetic data for our tests.
+# Using a subset of fields for simplicity, as we just need to test the parser's mechanics.
+SYNTHETIC_DATA = {
+    "DEMO": ["primaryid$caseid$sex", "101$1$M", "102$2$F"],
+    "DRUG": ["primaryid$drug_seq$drugname", "101$1$Aspirin", "101$2$Tylenol", "102$1$Motrin"],
+    "REAC": ["primaryid$pt", "101$Headache", "102$Fever"],
+    "OUTC": ["primaryid$outc_cod", "101$OT", "102$DE"],
+    "RPSR": ["primaryid$rpsr_cod", "101$MD"],
+    "THER": ["primaryid$start_dt", "101$20250101"],
+    "INDI": ["primaryid$indi_pt", "101$Pain"],
+}
+
+# Manually define schemas for the synthetic data to match the test data.
+# In a real scenario, this would be more comprehensive.
+TEST_SCHEMAS = {
+    "DEMO": ["primaryid", "caseid", "sex"],
+    "DRUG": ["primaryid", "drug_seq", "drugname"],
+    "REAC": ["primaryid", "pt"],
+    "OUTC": ["primaryid", "outc_cod"],
+    "RPSR": ["primaryid", "rpsr_cod"],
+    "THER": ["primaryid", "start_dt"],
+    "INDI": ["primaryid", "indi_pt"],
+}
 
 
 @pytest.fixture
-def sample_spl_file(tmp_path: Path) -> Path:
-    """Create a temporary sample SPL XML file for testing."""
-    spl_content = """<?xml version="1.0" encoding="UTF-8"?>
-<document xmlns="urn:hl7-org:v3">
-  <id root="d1b64b62-050a-4895-924c-d2862d2a6a69" />
-  <setId root="a2c3b6f0-a38f-4b48-96eb-3b2b403816a4" />
-  <versionNumber value="1" />
-  <effectiveTime value="20250907" />
-  <subject>
-    <manufacturedProduct>
-      <manufacturedProduct>
-        <name>Jules's Sample Drug</name>
-        <formCode code="C42916" displayName="TABLET" />
-        <asEntityWithGeneric>
-          <genericMedicine>
-            <name>JULAMYCIN</name>
-          </genericMedicine>
-        </asEntityWithGeneric>
-        <ingredient classCode="ACT">
-          <quantity>
-            <numerator value="100" unit="mg" />
-            <denominator value="1" unit="TABLET" />
-          </quantity>
-          <ingredientSubstance>
-            <name>JULESTAT</name>
-            <code code="UNII-JULE" displayName="JULESTAT" />
-          </ingredientSubstance>
-        </ingredient>
-      </manufacturedProduct>
-      <manufacturer>
-        <name>Jules Pharmaceuticals</name>
-      </manufacturer>
-    </manufacturedProduct>
-  </subject>
-  <component>
-    <structuredBody>
-      <component>
-        <section ID="s2">
-          <code code="51945-4" displayName="PACKAGE LABEL.PRINCIPAL DISPLAY PANEL" />
-          <text>
-            NDC 12345-678-90
-          </text>
-          <subject>
-            <marketingAct>
-              <statusCode code="active"/>
-              <effectiveTime>
-                <low value="20250101"/>
-              </effectiveTime>
-            </marketingAct>
-          </subject>
-        </section>
-      </component>
-    </structuredBody>
-  </component>
-</document>
-"""
-    file_path = tmp_path / "sample_spl.xml"
-    file_path.write_text(spl_content)
-    return file_path
+def faers_test_data_dir(tmp_path: Path) -> Path:
+    """Creates a temporary directory with a full set of synthetic FAERS data."""
+    data_dir = tmp_path / "faers_ascii"
+    data_dir.mkdir()
+    for table_name, lines in SYNTHETIC_DATA.items():
+        content = "\n".join(lines)
+        # Create a file like DEMO25Q2.txt to match the real naming scheme
+        (data_dir / f"{table_name}25Q2.txt").write_text(content)
+    return data_dir
 
 
-def test_parse_spl_file(sample_spl_file: Path):
+def test_stream_ascii_records(faers_test_data_dir: Path, mocker):
     """
-    Tests the happy path for parsing a well-formed SPL file.
+    Tests the streaming parser to ensure it reads and yields data correctly.
     """
-    data = parse_spl_file(sample_spl_file)
+    # Mock the real schemas to match our simplified test schemas
+    mocker.patch.dict(parsing.FAERS_ASCII_SCHEMAS, TEST_SCHEMAS)
 
-    # Assert metadata
-    assert data["document_id"] == "d1b64b62-050a-4895-924c-d2862d2a6a69"
-    assert data["set_id"] == "a2c3b6f0-a38f-4b48-96eb-3b2b403816a4"
-    assert data["version_number"] == 1
-    assert data["effective_time"] == "20250907"
+    records = list(parsing.stream_ascii_records(faers_test_data_dir))
 
-    # Assert product details
-    assert data["product_name"] == "Jules's Sample Drug"
-    assert data["manufacturer_name"] == "Jules Pharmaceuticals"
-    assert data["dosage_form"] == "TABLET"
+    # Total records should be the sum of data rows in SYNTHETIC_DATA
+    # 2+3+2+2+1+1+1 = 12
+    assert len(records) == 12
 
-    # Assert ingredients
-    assert len(data["ingredients"]) == 1
-    ingredient = data["ingredients"][0]
-    assert ingredient["ingredient_name"] == "JULESTAT"
-    assert ingredient["substance_code"] == "UNII-JULE"
-    assert ingredient["is_active_ingredient"] is True
-    assert ingredient["strength_numerator"] == "100"
-    assert ingredient["strength_denominator"] == "1"
-    assert ingredient["unit_of_measure"] == "mg"
+    # Spot check a few records
+    demo_record = next(r for r in records if r["table"] == "DEMO" and r["data"]["primaryid"] == "102")
+    assert demo_record["data"]["caseid"] == "2"
+    assert demo_record["data"]["sex"] == "F"
 
-    # Assert packaging
-    assert len(data["packaging"]) == 1
-    package = data["packaging"][0]
-    assert package["package_ndc"] == "NDC 12345-678-90"
+    drug_record = next(r for r in records if r["table"] == "DRUG" and r["data"]["drugname"] == "Tylenol")
+    assert drug_record["data"]["primaryid"] == "101"
+    assert drug_record["data"]["drug_seq"] == "2"
 
-    # Assert marketing status
-    assert len(data["marketing_status"]) == 1
-    status = data["marketing_status"][0]
-    assert status["marketing_category"] == "active"
-    assert status["start_date"] == "20250101"
+
+def test_parse_and_stage_ascii_quarter(faers_test_data_dir: Path, mocker):
+    """
+    Tests the end-to-end parsing and staging process.
+    """
+    mocker.patch.dict(parsing.FAERS_ASCII_SCHEMAS, TEST_SCHEMAS)
+    staging_dir = faers_test_data_dir.parent / "staged"
+
+    counts = parsing.parse_and_stage_ascii_quarter(faers_test_data_dir, staging_dir)
+
+    assert counts["DEMO"] == 2
+    assert counts["DRUG"] == 3
+    assert counts["REAC"] == 2
+    assert counts["OUTC"] == 2
+    assert counts["RPSR"] == 1
+    assert counts["THER"] == 1
+    assert counts["INDI"] == 1
+
+    # Verify the content of one of the created CSV files
+    demo_csv_path = staging_dir / "DEMO.csv"
+    assert demo_csv_path.exists()
+
+    with open(demo_csv_path, "r") as f:
+        reader = csv.reader(f)
+        lines = list(reader)
+
+    # Header + 2 data rows
+    assert len(lines) == 3
+    assert lines[0] == ["primaryid", "caseid", "sex"]
+    # Data rows can be in any order
+    assert ["101", "1", "M"] in lines
+    assert ["102", "2", "F"] in lines
