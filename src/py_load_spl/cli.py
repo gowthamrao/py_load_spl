@@ -7,7 +7,6 @@ from rich.console import Console
 
 from . import __name__ as app_name
 from .config import get_settings
-from .db.postgres import PostgresLoader
 from .parsing import iter_spl_files
 from .transformation import Transformer
 
@@ -39,11 +38,32 @@ def main(
         console.print("[bold red]No command specified. Use --help for options.[/bold red]")
 
 
+from .acquisition import download_spl_archives
+
+
+@app.command()
+def download(ctx: typer.Context) -> None:
+    """
+    F001: Download SPL archives from the FDA source.
+    This command fetches the list of available SPL data archives and
+    downloads a sample file to demonstrate the functionality.
+    """
+    console.print("[bold green]Starting data acquisition process...[/bold green]")
+    try:
+        download_spl_archives()
+        console.print("[bold green]Data acquisition command finished.[/bold green]")
+    except Exception as e:
+        console.print(f"[bold red]An error occurred during data acquisition: {e}[/bold red]")
+        raise typer.Exit(1)
+
+
 @app.command()
 def init(ctx: typer.Context) -> None:
     """
     F008.3: Initialize the database schema.
     """
+    from .db.postgres import PostgresLoader
+
     console.print("[bold green]Initializing database schema...[/bold green]")
     settings = ctx.obj
     # This is a simple factory, could be expanded for other adapters

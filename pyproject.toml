@@ -12,12 +12,13 @@ authors = [
 requires-python = ">=3.10"
 license = {text = "Apache-2.0"}
 dependencies = [
-    "lxml",
-    "requests",
+    "lxml>=6.0.1",
+    "requests>=2.32.5",
     "tenacity",
-    "pydantic>=2.0.0",
+    "pydantic>=2.11.7",
     "pydantic-settings",
-    "typer[all]",
+    "typer>=0.17.4",
+    "beautifulsoup4>=4.13.5",
 ]
 
 [project.optional-dependencies]
@@ -25,18 +26,6 @@ postgresql = ["psycopg2-binary"]
 
 [project.scripts]
 py-load-spl = "py_load_spl.cli:app"
-
-[tool.pdm]
-[tool.pdm.dev-dependencies]
-dev = [
-    "pytest",
-    "pytest-cov",
-    "testcontainers",
-    "ruff",
-    "black",
-    "mypy",
-    "pre-commit",
-]
 
 [tool.ruff]
 line-length = 88
@@ -60,4 +49,16 @@ testpaths = [
 ]
 markers = [
     "integration: marks tests as integration tests that require external services",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4.2",
+    "pytest-cov",
+    "testcontainers",
+    "ruff>=0.12.12",
+    "black>=25.1.0",
+    "mypy>=1.17.1",
+    "pre-commit",
+    "requests-mock>=1.12.1",
 ]
