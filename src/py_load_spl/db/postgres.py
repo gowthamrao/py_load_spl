@@ -1,10 +1,18 @@
 import logging
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Generator, Literal
 
+import psycopg2
+from psycopg2.extensions import connection
+
+from ..config import DatabaseSettings
 from .base import DatabaseLoader
 
 logger = logging.getLogger(__name__)
+
+# This path assumes the script is run from the project root
+SQL_SCHEMA_PATH = Path(__file__).parent / "sql/postgres_schema.sql"
 
 
 class PostgresLoader(DatabaseLoader):
@@ -14,24 +22,50 @@ class PostgresLoader(DatabaseLoader):
     This adapter uses the `COPY` command for efficient bulk loading (F007.1).
     """
 
-    def __init__(self, db_settings: Any) -> None:
+    def __init__(self, db_settings: DatabaseSettings) -> None:
         self.settings = db_settings
-        self.conn: Any | None = None
+        self.conn: connection | None = None
         logger.info("Initialized PostgreSQL Loader.")
 
-    def _connect(self) -> None:
-        """Establish database connection."""
-        # TODO: Implement connection logic using psycopg2
-        logger.info(
-            f"Connecting to PostgreSQL at {self.settings.host}:{self.settings.port}..."
-        )
-        self.conn = "mock_connection"
+    @contextmanager
+    def _get_conn(self) -> Generator[connection, None, None]:
+        """Establish and manage a database connection."""
+        if self.conn is None or self.conn.closed:
+            try:
+                logger.info(
+                    f"Connecting to PostgreSQL at {self.settings.host}:{self.settings.port}..."
+                )
+                self.conn = psycopg2.connect(
+                    dbname=self.settings.name,
+                    user=self.settings.user,
+                    password=self.settings.password,
+                    host=self.settings.host,
+                    port=self.settings.port,
+                )
+            except psycopg2.OperationalError as e:
+                logger.error(f"Database connection failed: {e}")
+                raise
+        yield self.conn
 
     def initialize_schema(self) -> None:
+        """Creates the necessary tables and structures from the DDL file."""
         logger.info("Initializing PostgreSQL schema...")
-        # TODO: Read DDL from a file and execute it.
-        # This will create all tables defined in Sec 4 of the FRD.
-        logger.info("Schema initialization complete.")
+        if not SQL_SCHEMA_PATH.exists():
+            raise FileNotFoundError(f"Schema file not found at {SQL_SCHEMA_PATH}")
+
+        ddl = SQL_SCHEMA_PATH.read_text()
+
+        try:
+            with self._get_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(ddl)
+                conn.commit()
+            logger.info("Schema initialization complete.")
+        except psycopg2.Error as e:
+            logger.error(f"Schema initialization failed: {e}")
+            if self.conn:
+                self.conn.rollback()
+            raise
 
     def bulk_load_to_staging(self, intermediate_dir: Path) -> None:
         logger.info(f"Bulk loading data from {intermediate_dir} to staging tables...")
