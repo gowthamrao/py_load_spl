@@ -8,7 +8,7 @@ from py_load_spl.config import Settings
 HTML_FIXTURE = """
 <html>
 <body>
-    <ul>
+    <ul class="download">
         <li>
             dm_spl_monthly_update_aug2025.zip [ <a href="https://dailymed-data.nlm.nih.gov/public-release-files/dm_spl_monthly_update_aug2025.zip">HTTPS</a> / <a href="ftp://...">FTP</a> ]
             <ul>

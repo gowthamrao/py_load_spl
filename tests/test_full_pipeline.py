@@ -63,6 +63,10 @@ def test_full_etl_pipeline_mocked(mock_psycopg2):
             adapter="postgresql",
         )
         loader = PostgresLoader(db_settings)
+        # Since we are testing the pipeline, we need to mock the new methods
+        loader.start_run = MagicMock(return_value=1)
+        loader.end_run = MagicMock()
+
 
         # 2. Act: Run the E-T-L process
         parsed_stream = iter_spl_files(source_dir)

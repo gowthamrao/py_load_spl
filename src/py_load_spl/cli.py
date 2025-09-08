@@ -81,41 +81,75 @@ def init(ctx: typer.Context) -> None:
         raise typer.Exit(1)
 
 
+from .db.postgres import PostgresLoader
+
+
 @app.command()
 def full_load(
     ctx: typer.Context,
     source: Path = typer.Option(
-        ..., help="Local path to the directory containing SPL XML files.", exists=True, file_okay=False, dir_okay=True, readable=True
+        ...,
+        help="Local path to the directory containing SPL XML files.",
+        exists=True,
+        file_okay=False,
+        dir_okay=True,
+        readable=True,
     ),
 ) -> None:
     """
     F008.3: Perform a full data load from a local directory.
+    This command orchestrates the E-T-L process:
+    - Extracts and parses XML files from the source directory.
+    - Transforms the data into intermediate CSV files.
+    - Loads the CSV files into a PostgreSQL database.
     """
+    settings = ctx.obj
     console.print(f"[bold cyan]Starting full data load from '{source}'...[/bold cyan]")
 
-    with tempfile.TemporaryDirectory() as temp_dir_str:
-        output_dir = Path(temp_dir_str)
-        console.print(f"Intermediate CSV files will be stored in: {output_dir}")
+    # Initialize the correct database loader
+    if settings.db.adapter == "postgresql":
+        loader = PostgresLoader(settings.db)
+    else:
+        console.print(f"[bold red]Error: Unsupported DB adapter '{settings.db.adapter}'[/bold red]")
+        raise typer.Exit(1)
 
-        # 1. Parsing
-        console.print("[cyan]Step 1: Parsing XML files...[/cyan]")
-        parsed_data_stream = iter_spl_files(source)
+    run_id = None
+    try:
+        # Start a new run record in the ETL history
+        run_id = loader.start_run(mode="full-load")
 
-        # 2. Transformation
-        console.print("[cyan]Step 2: Transforming data to CSV...[/cyan]")
-        transformer = Transformer(output_dir=output_dir)
-        transformer.transform_stream(parsed_data_stream)
+        with tempfile.TemporaryDirectory() as temp_dir_str:
+            output_dir = Path(temp_dir_str)
+            console.print(f"Intermediate CSV files will be stored in: {output_dir}")
 
-        console.print("[green]Parsing and Transformation complete.[/green]")
+            # 1. Parsing
+            console.print("[cyan]Step 1: Parsing and Transforming...[/cyan]")
+            parsed_data_stream = iter_spl_files(source)
+            transformer = Transformer(output_dir=output_dir)
+            transformer.transform_stream(parsed_data_stream)
+            console.print("[green]Parsing and Transformation complete.[/green]")
 
-        # 3. Loading (The next step in the implementation)
-        console.print("[yellow]Step 3: Loading data to database (not yet implemented).[/yellow]")
-        # TODO: Instantiate the DB loader
-        # TODO: Call loader.bulk_load_to_staging(output_dir)
-        # TODO: Call loader.merge_from_staging('full-load')
-        # etc.
+            # 2. Loading
+            console.print("[cyan]Step 2: Loading data into database...[/cyan]")
+            loader.pre_load_optimization()
+            loader.bulk_load_to_staging(output_dir)
+            loader.merge_from_staging("full-load")
+            loader.post_load_cleanup()
+            console.print("[green]Database loading complete.[/green]")
 
-    console.print("[bold green]Full load process finished.[/bold green]")
+        # If all steps succeeded, update the run status to SUCCESS
+        if run_id:
+            # In a real implementation, we would count records loaded.
+            # For now, we'll use a placeholder.
+            loader.end_run(run_id, "SUCCESS", records_loaded=0)
+        console.print("[bold green]Full load process finished successfully.[/bold green]")
+
+    except Exception as e:
+        console.print(f"[bold red]An error occurred during the full load process: {e}[/bold red]")
+        # If an error occurred, update the run status to FAILED
+        if run_id:
+            loader.end_run(run_id, "FAILED", error_log=str(e))
+        raise typer.Exit(1)
 
 
 @app.command()

@@ -42,6 +42,19 @@ class DatabaseLoader(ABC):
         pass
 
     @abstractmethod
-    def track_load_history(self, status: dict[str, Any]) -> None:
-        """Updates the ETL history tables (Sec 4.3)."""
+    def start_run(self, mode: Literal["full-load", "delta-load"]) -> int:
+        """
+        Creates a new entry in the ETL history table for the current run
+        and returns a unique run identifier.
+        """
+        pass
+
+    @abstractmethod
+    def end_run(
+        self, run_id: int, status: str, records_loaded: int, error_log: str | None
+    ) -> None:
+        """
+        Updates the ETL history table for the specified run with its final
+        status and metrics.
+        """
         pass
