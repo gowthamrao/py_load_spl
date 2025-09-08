@@ -58,3 +58,19 @@ class DatabaseLoader(ABC):
         status and metrics.
         """
         pass
+
+    @abstractmethod
+    def get_processed_archives(self) -> set[str]:
+        """
+        Retrieves the set of archive names that have already been
+        successfully processed.
+        """
+        pass
+
+    @abstractmethod
+    def record_processed_archive(self, archive_name: str, checksum: str) -> None:
+        """
+        Records a single archive as successfully processed in the database,
+        typically after a successful ETL cycle for that archive.
+        """
+        pass
