@@ -33,7 +33,8 @@ def parse_spl_file(file_path: Path) -> dict[str, Any]:
     Parses a single SPL XML file to extract key information (F002).
 
     This function uses `lxml.etree.iterparse` for memory-efficient parsing
-    and is designed to be resilient to missing elements.
+    and is designed to be resilient to missing elements. It also captures
+    the raw XML content for the 'Full Representation' (F004).
 
     Args:
         file_path: The path to the SPL XML file.
@@ -42,6 +43,14 @@ def parse_spl_file(file_path: Path) -> dict[str, Any]:
         A dictionary containing the extracted data.
     """
     logger.debug(f"Parsing SPL file: {file_path}")
+
+    # F004.1: Capture the complete, original XML content.
+    try:
+        raw_xml_content = file_path.read_text(encoding="utf-8")
+    except IOError as e:
+        logger.error(f"Could not read file {file_path}: {e}")
+        raise
+
     context = etree.iterparse(
         file_path, events=("end",), tag=f"{{{NAMESPACES['hl7']}}}document"
     )
@@ -49,7 +58,12 @@ def parse_spl_file(file_path: Path) -> dict[str, Any]:
     # Since we expect only one <document> element, we process the first one we find.
     _, root = next(context)
 
-    data: dict[str, Any] = {"ingredients": [], "packaging": [], "marketing_status": []}
+    data: dict[str, Any] = {
+        "ingredients": [],
+        "packaging": [],
+        "marketing_status": [],
+        "product_ndcs": [],
+    }
 
     try:
         # F002.3: Extract metadata
@@ -58,6 +72,10 @@ def parse_spl_file(file_path: Path) -> dict[str, Any]:
         data["version_number"] = int(_xp(root, ".//hl7:versionNumber").get("value", 0))
         data["effective_time"] = _xp(root, ".//hl7:effectiveTime").get("value")
 
+        # Add raw XML data for Full Representation
+        data["raw_data"] = raw_xml_content
+        data["source_filename"] = file_path.name
+
         # Extract product details
         product_element = _xp(root, ".//hl7:manufacturedProduct/hl7:manufacturedProduct")
         if product_element is not None:
@@ -65,52 +83,79 @@ def parse_spl_file(file_path: Path) -> dict[str, Any]:
             data["dosage_form"] = _xp(product_element, ".//hl7:formCode").get(
                 "displayName"
             )
-            # F002.3: Extract route of administration (best guess)
             route_code_el = _xp(product_element, ".//hl7:routeCode")
             if route_code_el is not None:
                 data["route_of_administration"] = route_code_el.get("displayName")
+
+            # Extract Product NDCs
+            for code_el in _xpa(
+                product_element,
+                ".//hl7:asEquivalentEntity/hl7:code[@codeSystem='2.16.840.1.113883.6.69']",
+            ):
+                ndc_code = code_el.get("code")
+                if ndc_code:
+                    data["product_ndcs"].append({"ndc_code": ndc_code})
 
         manufacturer = _xp(root, ".//hl7:manufacturer/hl7:name")
         if manufacturer is not None:
             data["manufacturer_name"] = manufacturer.text
 
         # Extract ingredients (F003.2)
-        for ingredient_el in _xpa(product_element, ".//hl7:ingredient"):
-            substance = _xp(ingredient_el, ".//hl7:ingredientSubstance")
-            quantity = _xp(ingredient_el, ".//hl7:quantity")
-            numerator = _xp(quantity, ".//hl7:numerator")
-            denominator = _xp(quantity, ".//hl7:denominator")
+        if product_element:
+            for ingredient_el in _xpa(product_element, ".//hl7:ingredient"):
+                substance = _xp(ingredient_el, ".//hl7:ingredientSubstance")
+                quantity = _xp(ingredient_el, ".//hl7:quantity")
+                numerator = _xp(quantity, ".//hl7:numerator")
+                denominator = _xp(quantity, ".//hl7:denominator")
 
-            data["ingredients"].append(
-                {
-                    "ingredient_name": _xp(substance, ".//hl7:name").text,
-                    "substance_code": _xp(substance, ".//hl7:code").get("code"),
-                    "is_active_ingredient": ingredient_el.get("classCode") == "ACT",
-                    "strength_numerator": numerator.get("value"),
-                    "strength_denominator": denominator.get("value"),
-                    "unit_of_measure": numerator.get("unit"),
-                }
-            )
+                data["ingredients"].append(
+                    {
+                        "ingredient_name": _xp(substance, ".//hl7:name").text,
+                        "substance_code": _xp(substance, ".//hl7:code").get("code"),
+                        "is_active_ingredient": ingredient_el.get("classCode") == "ACT",
+                        "strength_numerator": numerator.get("value"),
+                        "strength_denominator": denominator.get("value"),
+                        "unit_of_measure": numerator.get("unit"),
+                    }
+                )
 
-        # Extract packaging and marketing status from the structured body
+        # Extract from the structured body
         body = _xp(root, ".//hl7:component/hl7:structuredBody")
         if body is not None:
-            # Find the packaging section by iterating through sections
+            # Find the packaging section
             packaging_section = None
             for section in _xpa(body, ".//hl7:section"):
-                # The code element is a direct child of the section
                 code_el = _xp(section, "hl7:code")
-                if code_el is not None and code_el.get("code") == "51945-4":
+                if code_el is not None and code_el.get("code") in ("51945-4", "34069-5"):
                     packaging_section = section
-                    break  # Found it
+                    break
 
+            # New, more robust packaging extraction
             if packaging_section is not None:
-                # Extract package NDC from the text element
-                text_el = _xp(packaging_section, "hl7:text")
-                if text_el is not None and text_el.text and "NDC" in text_el.text:
-                    data["packaging"].append(
-                        {"package_ndc": text_el.text.strip()}
+                # Using iterdescendants as a more robust way to find descendant nodes
+                # regardless of XPath subset limitations in findall.
+                for part_el in packaging_section.iterdescendants(
+                    f"{{{NAMESPACES['hl7']}}}part"
+                ):
+                    part_code_el = _xp(part_el, ".//hl7:code")
+                    package_ndc = part_code_el.get("code") if part_code_el else None
+
+                    desc_el = _xp(part_el, ".//hl7:desc") or _xp(part_el, ".//hl7:name")
+                    package_desc = desc_el.text if desc_el is not None else None
+
+                    form_code_el = _xp(part_el, ".//hl7:formCode")
+                    package_type = (
+                        form_code_el.get("displayName") if form_code_el else None
                     )
+
+                    if package_ndc:
+                        data["packaging"].append(
+                            {
+                                "package_ndc": package_ndc,
+                                "package_description": package_desc,
+                                "package_type": package_type,
+                            }
+                        )
 
                 # Extract marketing status
                 marketing_act = _xp(packaging_section, ".//hl7:marketingAct")
@@ -120,10 +165,10 @@ def parse_spl_file(file_path: Path) -> dict[str, Any]:
                     data["marketing_status"].append(
                         {
                             "marketing_category": status_code.get("code")
-                            if status_code is not None
+                            if status_code
                             else None,
                             "start_date": effective_time.get("value")
-                            if effective_time is not None
+                            if effective_time
                             else None,
                         }
                     )
