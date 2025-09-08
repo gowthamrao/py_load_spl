@@ -28,6 +28,34 @@ class Product(BaseModel):
         return v
 
 
+class SplRawDocument(BaseModel):
+    """Data model for the 'spl_raw_documents' table (FRD Sec 4.2)."""
+
+    document_id: UUID
+    set_id: UUID
+    version_number: int
+    effective_time: date
+    raw_data: str  # This will be the raw XML string
+    source_filename: str
+    loaded_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+    # Re-using the validator from the Product model
+    @field_validator("effective_time", mode="before")
+    @classmethod
+    def parse_effective_time(cls, v: Any) -> date | None:
+        """Parse date from 'YYYYMMDD' string format."""
+        if isinstance(v, str):
+            return datetime.strptime(v, "%Y%m%d").date()
+        return v
+
+
+class ProductNdc(BaseModel):
+    """Data model for the 'product_ndcs' table."""
+
+    document_id: UUID
+    ndc_code: str
+
+
 class Ingredient(BaseModel):
     """Data model for the 'ingredients' table."""
 

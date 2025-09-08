@@ -1,4 +1,5 @@
 import csv
+import json
 import logging
 from collections.abc import Iterable
 from pathlib import Path
@@ -6,16 +7,25 @@ from typing import Any, IO
 
 from pydantic import BaseModel
 
-from .models import Ingredient, MarketingStatus, Packaging, Product
+from .models import (
+    Ingredient,
+    MarketingStatus,
+    Packaging,
+    Product,
+    ProductNdc,
+    SplRawDocument,
+)
 
 logger = logging.getLogger(__name__)
 
 # A mapping from our Pydantic models to the output CSV filenames.
 MODEL_TO_FILENAME_MAP = {
     Product: "products.csv",
+    ProductNdc: "product_ndcs.csv",
     Ingredient: "ingredients.csv",
     Packaging: "packaging.csv",
     MarketingStatus: "marketing_status.csv",
+    SplRawDocument: "spl_raw_documents.csv",
 }
 
 
@@ -94,16 +104,29 @@ class Transformer:
                     continue
 
                 try:
-                    # 1. Transform and write the main Product record
+                    # 1. Transform and write the Full Representation record
+                    # The raw XML string must be encoded as a valid JSON string literal
+                    # to be loaded into a JSONB column.
+                    raw_xml_content = record.pop("raw_xml")
+                    record["raw_data"] = json.dumps(raw_xml_content)
+                    raw_doc = SplRawDocument.model_validate(record)
+                    writer_manager.write_row(raw_doc)
+
+                    # 2. Transform and write the main Product record
                     product = Product.model_validate(record)
                     writer_manager.write_row(product)
 
-                    # 2. Transform and write one-to-many Ingredient records
+                    # 3. Transform and write one-to-many ProductNdc records
+                    for ndc_data in record.get("product_ndcs", []):
+                        ndc = ProductNdc(document_id=doc_id, **ndc_data)
+                        writer_manager.write_row(ndc)
+
+                    # 4. Transform and write one-to-many Ingredient records
                     for ing_data in record.get("ingredients", []):
                         ingredient = Ingredient(document_id=doc_id, **ing_data)
                         writer_manager.write_row(ingredient)
 
-                    # 3. Transform and write one-to-many Packaging records
+                    # 5. Transform and write one-to-many Packaging records
                     for pkg_data in record.get("packaging", []):
                         packaging = Packaging(document_id=doc_id, **pkg_data)
                         writer_manager.write_row(packaging)

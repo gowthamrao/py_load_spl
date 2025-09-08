@@ -70,20 +70,21 @@ class PostgresLoader(DatabaseLoader):
     def bulk_load_to_staging(self, intermediate_dir: Path) -> None:
         """Loads data from CSV files into staging tables using COPY."""
         logger.info(f"Bulk loading data from {intermediate_dir} into staging tables...")
-        # Map CSV filenames to their target staging tables
+        # Map CSV filenames to (table_name, optional_column_list)
+        # Columns must be specified for tables with auto-incrementing PKs
         file_to_table_map = {
-            "products.csv": "products_staging",
-            "ingredients.csv": "ingredients_staging",
-            "packaging.csv": "packaging_staging",
-            "marketing_status.csv": "marketing_status_staging",
-            "product_ndcs.csv": "product_ndcs_staging",
-            "spl_raw_documents.csv": "spl_raw_documents_staging",
+            "products.csv": ("products_staging", "(document_id, set_id, version_number, effective_time, product_name, manufacturer_name, dosage_form, route_of_administration, is_latest_version, loaded_at)"),
+            "ingredients.csv": ("ingredients_staging", "(document_id, ingredient_name, substance_code, strength_numerator, strength_denominator, unit_of_measure, is_active_ingredient)"),
+            "packaging.csv": ("packaging_staging", "(document_id, package_ndc, package_description, package_type)"),
+            "marketing_status.csv": ("marketing_status_staging", "(document_id, marketing_category, start_date, end_date)"),
+            "product_ndcs.csv": ("product_ndcs_staging", "(document_id, ndc_code)"),
+            "spl_raw_documents.csv": ("spl_raw_documents_staging", "(document_id, set_id, version_number, effective_time, raw_data, source_filename, loaded_at)"),
         }
 
         try:
             with self._get_conn() as conn:
                 with conn.cursor() as cur:
-                    for filename, table_name in file_to_table_map.items():
+                    for filename, (table_name, columns) in file_to_table_map.items():
                         filepath = intermediate_dir / filename
                         if not filepath.exists():
                             logger.warning(
@@ -94,7 +95,7 @@ class PostgresLoader(DatabaseLoader):
                         logger.info(f"Loading {filename} into {table_name}...")
                         # F007.1: Use copy_expert for efficient bulk loading
                         sql = f"""
-                            COPY {table_name} FROM STDIN
+                            COPY {table_name} {columns or ''} FROM STDIN
                             WITH (FORMAT CSV, NULL '\\N', QUOTE '\"');
                         """
                         with open(filepath, "r", encoding="utf-8") as f:

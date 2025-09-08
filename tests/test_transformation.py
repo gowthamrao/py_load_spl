@@ -14,6 +14,9 @@ SAMPLE_PARSED_RECORD = {
     "product_name": "Jules's Sample Drug",
     "manufacturer_name": "Jules Pharmaceuticals",
     "dosage_form": "TABLET",
+    "raw_xml": "<document>...</document>",
+    "source_filename": "test.xml",
+    "product_ndcs": [{"ndc_code": "12345-678"}],
     "ingredients": [
         {
             "ingredient_name": "JULESTAT",
@@ -24,7 +27,13 @@ SAMPLE_PARSED_RECORD = {
             "unit_of_measure": "mg",
         }
     ],
-    "packaging": [{"package_ndc": "NDC 12345-678-90"}],
+    "packaging": [
+        {
+            "package_ndc": "12345-678-90",
+            "package_description": "100 TABLET in 1 BOTTLE",
+            "package_type": "BOTTLE",
+        }
+    ],
     "marketing_status": [
         {"marketing_category": "active", "start_date": "20250101"}
     ],
@@ -87,8 +96,9 @@ def test_transformer_creates_correct_csvs(tmp_path: Path) -> None:
         assert len(rows) == 1
         packaging_row = rows[0]
         assert packaging_row[0] == "d1b64b62-050a-4895-924c-d2862d2a6a69"
-        assert packaging_row[1] == "NDC 12345-678-90"
-        assert packaging_row[2] == "\\N" # package_description (None)
+        assert packaging_row[1] == "12345-678-90"
+        assert packaging_row[2] == "100 TABLET in 1 BOTTLE"
+        assert packaging_row[3] == "BOTTLE"
 
     # Verify the content of marketing_status.csv
     with open(marketing_status_csv) as f:

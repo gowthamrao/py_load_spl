@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="urn:hl7-org:v3">
+  <id root="d1b64b62-050a-4895-924c-d2862d2a6a69" />
+  <setId root="a2c3b6f0-a38f-4b48-96eb-3b2b403816a4" />
+  <versionNumber value="1" />
+  <effectiveTime value="20250907" />
+  <subject>
+    <manufacturedProduct>
+      <manufacturedProduct>
+        <code code="12345-678" displayName="Product NDC" />
+        <name>Jules's Sample Drug</name>
+        <formCode code="C42916" displayName="TABLET" />
+        <asEntityWithGeneric>
+          <genericMedicine>
+            <name>JULAMYCIN</name>
+          </genericMedicine>
+        </asEntityWithGeneric>
+        <ingredient classCode="ACT">
+          <quantity>
+            <numerator value="100" unit="mg" />
+            <denominator value="1" unit="TABLET" />
+          </quantity>
+          <ingredientSubstance>
+            <name>JULESTAT</name>
+            <code code="UNII-JULE" displayName="JULESTAT" />
+          </ingredientSubstance>
+        </ingredient>
+      </manufacturedProduct>
+      <manufacturer>
+        <name>Jules Pharmaceuticals</name>
+      </manufacturer>
+    </manufacturedProduct>
+  </subject>
+  <component>
+    <structuredBody>
+      <component>
+        <section>
+          <code code="34089-3" displayName="DESCRIPTION SECTION" />
+          <text>A sample drug for testing.</text>
+        </section>
+      </component>
+      <component>
+        <section>
+          <code code="51945-4" displayName="PACKAGE LABEL.PRINCIPAL DISPLAY PANEL" />
+          <component>
+            <section>
+              <part>
+                <containerPackage>
+                  <code code="12345-678-90" displayName="Package NDC"/>
+                  <name>100 TABLET in 1 BOTTLE</name>
+                  <formCode code="C43169" displayName="BOTTLE"/>
+                </containerPackage>
+              </part>
+              <part>
+                <containerPackage>
+                  <code code="12345-678-91" displayName="Package NDC"/>
+                  <name>50 TABLET in 1 BLISTER PACK</name>
+                  <formCode code="C43168" displayName="BLISTER PACK"/>
+                </containerPackage>
+              </part>
+            </section>
+          </component>
+        </section>
+      </component>
+    </structuredBody>
+  </component>
+</document>

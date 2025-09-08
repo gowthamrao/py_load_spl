@@ -108,12 +108,30 @@ def full_load(
 
         console.print("[green]Parsing and Transformation complete.[/green]")
 
-        # 3. Loading (The next step in the implementation)
-        console.print("[yellow]Step 3: Loading data to database (not yet implemented).[/yellow]")
-        # TODO: Instantiate the DB loader
-        # TODO: Call loader.bulk_load_to_staging(output_dir)
-        # TODO: Call loader.merge_from_staging('full-load')
-        # etc.
+        # 3. Loading
+        console.print("[cyan]Step 3: Loading data to database...[/cyan]")
+        settings = ctx.obj
+        # This is a simple factory, could be expanded for other adapters
+        if settings.db.adapter == "postgresql":
+            from .db.postgres import PostgresLoader
+            loader = PostgresLoader(settings.db)
+        else:
+            console.print(f"[bold red]Error: Unsupported DB adapter '{settings.db.adapter}'[/bold red]")
+            raise typer.Exit(1)
+
+        try:
+            # In a full load, we might disable indexes and constraints for performance
+            # loader.pre_load_optimization()
+
+            loader.bulk_load_to_staging(output_dir)
+            loader.merge_from_staging(mode="full-load")
+
+            # And then re-enable them and perform maintenance
+            # loader.post_load_cleanup()
+            console.print("[green]Data loading complete.[/green]")
+        except Exception as e:
+            console.print(f"[bold red]An error occurred during data loading: {e}[/bold red]")
+            raise typer.Exit(1)
 
     console.print("[bold green]Full load process finished.[/bold green]")
 

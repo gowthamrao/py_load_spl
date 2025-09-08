@@ -1,3 +1,4 @@
+import io
 import logging
 from collections.abc import Generator
 from pathlib import Path
@@ -42,14 +43,25 @@ def parse_spl_file(file_path: Path) -> dict[str, Any]:
         A dictionary containing the extracted data.
     """
     logger.debug(f"Parsing SPL file: {file_path}")
+    # F004.1: Capture the complete, original XML data
+    raw_xml = file_path.read_text(encoding="utf-8")
     context = etree.iterparse(
-        file_path, events=("end",), tag=f"{{{NAMESPACES['hl7']}}}document"
+        io.BytesIO(raw_xml.encode("utf-8")),
+        events=("end",),
+        tag=f"{{{NAMESPACES['hl7']}}}document",
     )
 
     # Since we expect only one <document> element, we process the first one we find.
     _, root = next(context)
 
-    data: dict[str, Any] = {"ingredients": [], "packaging": [], "marketing_status": []}
+    data: dict[str, Any] = {
+        "raw_xml": raw_xml,
+        "source_filename": file_path.name,
+        "product_ndcs": [],
+        "ingredients": [],
+        "packaging": [],
+        "marketing_status": [],
+    }
 
     try:
         # F002.3: Extract metadata
@@ -69,6 +81,14 @@ def parse_spl_file(file_path: Path) -> dict[str, Any]:
             route_code_el = _xp(product_element, ".//hl7:routeCode")
             if route_code_el is not None:
                 data["route_of_administration"] = route_code_el.get("displayName")
+
+            # Extract the Product NDC code
+            # Based on assumption that it's a direct child of manufacturedProduct
+            code_el = _xp(product_element, ".//hl7:code")
+            if code_el is not None:
+                ndc_code = code_el.get("code")
+                if ndc_code:
+                    data["product_ndcs"].append({"ndc_code": ndc_code})
 
         manufacturer = _xp(root, ".//hl7:manufacturer/hl7:name")
         if manufacturer is not None:
@@ -105,11 +125,22 @@ def parse_spl_file(file_path: Path) -> dict[str, Any]:
                     break  # Found it
 
             if packaging_section is not None:
-                # Extract package NDC from the text element
-                text_el = _xp(packaging_section, "hl7:text")
-                if text_el is not None and text_el.text and "NDC" in text_el.text:
+                # Based on investigation, packaging information is often in `part` -> `containerPackage`
+                for part_el in _xpa(packaging_section, ".//hl7:part"):
+                    pkg = _xp(part_el, ".//hl7:containerPackage")
+                    if pkg is None:
+                        continue
+
+                    code_el = _xp(pkg, ".//hl7:code")
+                    name_el = _xp(pkg, ".//hl7:name")
+                    form_code_el = _xp(pkg, ".//hl7:formCode")
+
                     data["packaging"].append(
-                        {"package_ndc": text_el.text.strip()}
+                        {
+                            "package_ndc": code_el.get("code") if code_el is not None else None,
+                            "package_description": name_el.text if name_el is not None else None,
+                            "package_type": form_code_el.get("displayName") if form_code_el is not None else None,
+                        }
                     )
 
                 # Extract marketing status

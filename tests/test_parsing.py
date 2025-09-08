@@ -7,6 +7,7 @@ from py_load_spl.parsing import parse_spl_file
 @pytest.fixture
 def sample_spl_file(tmp_path: Path) -> Path:
     """Create a temporary sample SPL XML file for testing."""
+    # Using a more complete structure based on test_spl_full.xml
     spl_content = """<?xml version="1.0" encoding="UTF-8"?>
 <document xmlns="urn:hl7-org:v3">
   <id root="d1b64b62-050a-4895-924c-d2862d2a6a69" />
@@ -16,13 +17,9 @@ def sample_spl_file(tmp_path: Path) -> Path:
   <subject>
     <manufacturedProduct>
       <manufacturedProduct>
+        <code code="12345-678" displayName="Product NDC" />
         <name>Jules's Sample Drug</name>
         <formCode code="C42916" displayName="TABLET" />
-        <asEntityWithGeneric>
-          <genericMedicine>
-            <name>JULAMYCIN</name>
-          </genericMedicine>
-        </asEntityWithGeneric>
         <ingredient classCode="ACT">
           <quantity>
             <numerator value="100" unit="mg" />
@@ -42,11 +39,19 @@ def sample_spl_file(tmp_path: Path) -> Path:
   <component>
     <structuredBody>
       <component>
-        <section ID="s2">
+        <section>
           <code code="51945-4" displayName="PACKAGE LABEL.PRINCIPAL DISPLAY PANEL" />
-          <text>
-            NDC 12345-678-90
-          </text>
+          <component>
+            <section>
+              <part>
+                <containerPackage>
+                  <code code="12345-678-90" displayName="Package NDC"/>
+                  <name>100 TABLET in 1 BOTTLE</name>
+                  <formCode code="C43169" displayName="BOTTLE"/>
+                </containerPackage>
+              </part>
+            </section>
+          </component>
           <subject>
             <marketingAct>
               <statusCode code="active"/>
@@ -82,6 +87,9 @@ def test_parse_spl_file(sample_spl_file: Path):
     assert data["product_name"] == "Jules's Sample Drug"
     assert data["manufacturer_name"] == "Jules Pharmaceuticals"
     assert data["dosage_form"] == "TABLET"
+    assert len(data["product_ndcs"]) == 1
+    assert data["product_ndcs"][0]["ndc_code"] == "12345-678"
+
 
     # Assert ingredients
     assert len(data["ingredients"]) == 1
@@ -96,7 +104,10 @@ def test_parse_spl_file(sample_spl_file: Path):
     # Assert packaging
     assert len(data["packaging"]) == 1
     package = data["packaging"][0]
-    assert package["package_ndc"] == "NDC 12345-678-90"
+    assert package["package_ndc"] == "12345-678-90"
+    assert package["package_description"] == "100 TABLET in 1 BOTTLE"
+    assert package["package_type"] == "BOTTLE"
+
 
     # Assert marketing status
     assert len(data["marketing_status"]) == 1
