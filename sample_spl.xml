@@ -14,6 +14,9 @@
             <name>JULAMYCIN</name>
           </genericMedicine>
         </asEntityWithGeneric>
+        <asEquivalentEntity>
+            <code code="12345-678" codeSystem="2.16.840.1.113883.6.69" />
+        </asEquivalentEntity>
         <ingredient classCode="ACT">
           <quantity>
             <numerator value="100" unit="mg" />
@@ -36,8 +39,17 @@
         <section ID="s2">
           <code code="51945-4" displayName="PACKAGE LABEL.PRINCIPAL DISPLAY PANEL" />
           <text>
-            NDC 12345-678-90
+            Some text here that the old parser might have used.
           </text>
+          <component>
+            <section>
+                <part>
+                  <code code="12345-678-90" displayName="NDC" />
+                  <name>30 Tablets in 1 Bottle</name>
+                  <formCode code="C43182" displayName="BOTTLE" />
+                </part>
+            </section>
+          </component>
           <subject>
             <marketingAct>
               <statusCode code="active"/>

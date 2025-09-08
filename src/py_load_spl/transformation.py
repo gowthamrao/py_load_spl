@@ -6,7 +6,14 @@ from typing import Any, IO
 
 from pydantic import BaseModel
 
-from .models import Ingredient, MarketingStatus, Packaging, Product
+from .models import (
+    Ingredient,
+    MarketingStatus,
+    Packaging,
+    Product,
+    ProductNdc,
+    SplRawDocument,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +23,8 @@ MODEL_TO_FILENAME_MAP = {
     Ingredient: "ingredients.csv",
     Packaging: "packaging.csv",
     MarketingStatus: "marketing_status.csv",
+    ProductNdc: "product_ndcs.csv",
+    SplRawDocument: "spl_raw_documents.csv",
 }
 
 
@@ -98,20 +107,29 @@ class Transformer:
                     product = Product.model_validate(record)
                     writer_manager.write_row(product)
 
-                    # 2. Transform and write one-to-many Ingredient records
+                    # 2. Transform and write the SplRawDocument record
+                    raw_doc = SplRawDocument.model_validate(record)
+                    writer_manager.write_row(raw_doc)
+
+                    # 3. Transform and write one-to-many Ingredient records
                     for ing_data in record.get("ingredients", []):
                         ingredient = Ingredient(document_id=doc_id, **ing_data)
                         writer_manager.write_row(ingredient)
 
-                    # 3. Transform and write one-to-many Packaging records
+                    # 4. Transform and write one-to-many Packaging records
                     for pkg_data in record.get("packaging", []):
                         packaging = Packaging(document_id=doc_id, **pkg_data)
                         writer_manager.write_row(packaging)
 
-                    # 4. Transform and write one-to-many MarketingStatus records
+                    # 5. Transform and write one-to-many MarketingStatus records
                     for mkt_data in record.get("marketing_status", []):
                         status = MarketingStatus(document_id=doc_id, **mkt_data)
                         writer_manager.write_row(status)
+
+                    # 6. Transform and write one-to-many ProductNdc records
+                    for ndc_data in record.get("product_ndcs", []):
+                        ndc = ProductNdc(document_id=doc_id, **ndc_data)
+                        writer_manager.write_row(ndc)
 
                 except Exception as e:
                     logger.error(f"Failed to transform record with doc_id {doc_id}. Error: {e}")

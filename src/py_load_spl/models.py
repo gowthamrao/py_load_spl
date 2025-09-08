@@ -28,6 +28,33 @@ class Product(BaseModel):
         return v
 
 
+class ProductNdc(BaseModel):
+    """Data model for the 'product_ndcs' table."""
+
+    document_id: UUID
+    ndc_code: str
+
+
+class SplRawDocument(BaseModel):
+    """Data model for the 'spl_raw_documents' table (Full Representation)."""
+
+    document_id: UUID
+    set_id: UUID
+    version_number: int
+    effective_time: date
+    raw_data: str
+    source_filename: str
+    loaded_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+    @field_validator("effective_time", mode="before")
+    @classmethod
+    def parse_effective_time(cls, v: Any) -> date | None:
+        """Parse date from 'YYYYMMDD' string format."""
+        if isinstance(v, str):
+            return datetime.strptime(v, "%Y%m%d").date()
+        return v
+
+
 class Ingredient(BaseModel):
     """Data model for the 'ingredients' table."""
 
