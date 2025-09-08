@@ -16,7 +16,7 @@ class Product(BaseModel):
     manufacturer_name: str | None = Field(default=None)
     dosage_form: str | None = Field(default=None)
     route_of_administration: str | None = Field(default=None)
-    is_latest_version: bool = Field(default=True)
+    is_latest_version: bool = Field(default=False)
     loaded_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     @field_validator("effective_time", mode="before")

@@ -218,6 +218,32 @@ class PostgresLoader(DatabaseLoader):
                                 cur.execute(f"DELETE FROM {table} WHERE document_id IN %s;", (doc_ids_to_update,))
                                 cur.execute(f"INSERT INTO {table} SELECT * FROM {table}_staging;")
 
+                    # Final step: Update the is_latest_version flag for all affected products.
+                    # This is done for both full and delta loads to ensure consistency.
+                    # NOTE: This query relies on the transaction's visibility of the rows
+                    # inserted/updated in the 'products' table earlier in this same transaction.
+                    # It correctly identifies all set_ids from the staging batch and then re-ranks
+                    # all versions (including new ones) for those set_ids in the main products table.
+                    logger.info("Updating is_latest_version flag for all affected products...")
+                    cur.execute("""
+                        WITH affected_set_ids AS (
+                            SELECT DISTINCT set_id FROM products_staging
+                        ),
+                        ranked_products AS (
+                            SELECT
+                                document_id,
+                                ROW_NUMBER() OVER(
+                                    PARTITION BY set_id ORDER BY version_number DESC, effective_time DESC
+                                ) as rn
+                            FROM products
+                            WHERE set_id IN (SELECT set_id FROM affected_set_ids)
+                        )
+                        UPDATE products
+                        SET is_latest_version = (ranked_products.rn = 1)
+                        FROM ranked_products
+                        WHERE products.document_id = ranked_products.document_id;
+                    """)
+
                     # Truncate all staging tables after the merge is complete
                     logger.info("Truncating staging tables...")
                     for table in tables_in_dependency_order:
