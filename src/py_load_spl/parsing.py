@@ -79,10 +79,14 @@ def parse_spl_file(file_path: Path) -> dict[str, Any]:
         # Extract product details
         product_element = _xp(root, ".//hl7:manufacturedProduct/hl7:manufacturedProduct")
         if product_element is not None:
-            data["product_name"] = _xp(product_element, ".//hl7:name").text
-            data["dosage_form"] = _xp(product_element, ".//hl7:formCode").get(
-                "displayName"
-            )
+            product_name_el = _xp(product_element, ".//hl7:name")
+            if product_name_el is not None:
+                data["product_name"] = product_name_el.text
+
+            dosage_form_el = _xp(product_element, ".//hl7:formCode")
+            if dosage_form_el is not None:
+                data["dosage_form"] = dosage_form_el.get("displayName")
+
             route_code_el = _xp(product_element, ".//hl7:routeCode")
             if route_code_el is not None:
                 data["route_of_administration"] = route_code_el.get("displayName")
@@ -96,26 +100,29 @@ def parse_spl_file(file_path: Path) -> dict[str, Any]:
                 if ndc_code:
                     data["product_ndcs"].append({"ndc_code": ndc_code})
 
-        manufacturer = _xp(root, ".//hl7:manufacturer/hl7:name")
-        if manufacturer is not None:
-            data["manufacturer_name"] = manufacturer.text
+        manufacturer_el = _xp(root, ".//hl7:manufacturer/hl7:name")
+        if manufacturer_el is not None:
+            data["manufacturer_name"] = manufacturer_el.text
 
         # Extract ingredients (F003.2)
-        if product_element:
+        if product_element is not None:
             for ingredient_el in _xpa(product_element, ".//hl7:ingredient"):
                 substance = _xp(ingredient_el, ".//hl7:ingredientSubstance")
                 quantity = _xp(ingredient_el, ".//hl7:quantity")
-                numerator = _xp(quantity, ".//hl7:numerator")
-                denominator = _xp(quantity, ".//hl7:denominator")
+                numerator = _xp(quantity, ".//hl7:numerator") if quantity is not None else None
+                denominator = _xp(quantity, ".//hl7:denominator") if quantity is not None else None
+
+                substance_name_el = _xp(substance, ".//hl7:name") if substance is not None else None
+                substance_code_el = _xp(substance, ".//hl7:code") if substance is not None else None
 
                 data["ingredients"].append(
                     {
-                        "ingredient_name": _xp(substance, ".//hl7:name").text,
-                        "substance_code": _xp(substance, ".//hl7:code").get("code"),
+                        "ingredient_name": substance_name_el.text if substance_name_el is not None else None,
+                        "substance_code": substance_code_el.get("code") if substance_code_el is not None else None,
                         "is_active_ingredient": ingredient_el.get("classCode") == "ACT",
-                        "strength_numerator": numerator.get("value"),
-                        "strength_denominator": denominator.get("value"),
-                        "unit_of_measure": numerator.get("unit"),
+                        "strength_numerator": numerator.get("value") if numerator is not None else None,
+                        "strength_denominator": denominator.get("value") if denominator is not None else None,
+                        "unit_of_measure": numerator.get("unit") if numerator is not None else None,
                     }
                 )
 
@@ -130,22 +137,20 @@ def parse_spl_file(file_path: Path) -> dict[str, Any]:
                     packaging_section = section
                     break
 
-            # New, more robust packaging extraction
             if packaging_section is not None:
-                # Using iterdescendants as a more robust way to find descendant nodes
-                # regardless of XPath subset limitations in findall.
+                # Using iterdescendants to find descendant nodes
                 for part_el in packaging_section.iterdescendants(
                     f"{{{NAMESPACES['hl7']}}}part"
                 ):
                     part_code_el = _xp(part_el, ".//hl7:code")
-                    package_ndc = part_code_el.get("code") if part_code_el else None
+                    package_ndc = part_code_el.get("code") if part_code_el is not None else None
 
                     desc_el = _xp(part_el, ".//hl7:desc") or _xp(part_el, ".//hl7:name")
                     package_desc = desc_el.text if desc_el is not None else None
 
                     form_code_el = _xp(part_el, ".//hl7:formCode")
                     package_type = (
-                        form_code_el.get("displayName") if form_code_el else None
+                        form_code_el.get("displayName") if form_code_el is not None else None
                     )
 
                     if package_ndc:
@@ -157,19 +162,20 @@ def parse_spl_file(file_path: Path) -> dict[str, Any]:
                             }
                         )
 
-                # Extract marketing status
-                marketing_act = _xp(packaging_section, ".//hl7:marketingAct")
-                if marketing_act is not None:
-                    status_code = _xp(marketing_act, ".//hl7:statusCode")
-                    effective_time = _xp(marketing_act, ".//hl7:effectiveTime/hl7:low")
+                # New, more robust marketing status extraction
+                marketing_acts = _xpa(packaging_section, "./hl7:subject/hl7:marketingAct")
+                for act in marketing_acts:
+                    status_code_el = _xp(act, "./hl7:statusCode")
+                    effective_time_el = _xp(act, "./hl7:effectiveTime")
+
+                    start_date_el = _xp(effective_time_el, "./hl7:low") if effective_time_el is not None else None
+                    end_date_el = _xp(effective_time_el, "./hl7:high") if effective_time_el is not None else None
+
                     data["marketing_status"].append(
                         {
-                            "marketing_category": status_code.get("code")
-                            if status_code
-                            else None,
-                            "start_date": effective_time.get("value")
-                            if effective_time
-                            else None,
+                            "marketing_category": status_code_el.get("code") if status_code_el is not None else None,
+                            "start_date": start_date_el.get("value") if start_date_el is not None else None,
+                            "end_date": end_date_el.get("value") if end_date_el is not None else None,
                         }
                     )
 
