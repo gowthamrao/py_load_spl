@@ -62,9 +62,13 @@ def parse_spl_file(file_path: Path) -> dict[str, Any]:
         product_element = _xp(root, ".//hl7:manufacturedProduct/hl7:manufacturedProduct")
         if product_element is not None:
             data["product_name"] = _xp(product_element, ".//hl7:name").text
-            data["dosage_form"] = _xp(product_element, ".//hl7:formCode").get("displayName")
-            # Route of administration is often in a similar place, but not in the sample
-            # data["route_of_administration"] = ...
+            data["dosage_form"] = _xp(product_element, ".//hl7:formCode").get(
+                "displayName"
+            )
+            # F002.3: Extract route of administration (best guess)
+            route_code_el = _xp(product_element, ".//hl7:routeCode")
+            if route_code_el is not None:
+                data["route_of_administration"] = route_code_el.get("displayName")
 
         manufacturer = _xp(root, ".//hl7:manufacturer/hl7:name")
         if manufacturer is not None:

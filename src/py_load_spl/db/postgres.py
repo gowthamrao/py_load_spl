@@ -68,9 +68,44 @@ class PostgresLoader(DatabaseLoader):
             raise
 
     def bulk_load_to_staging(self, intermediate_dir: Path) -> None:
-        logger.info(f"Bulk loading data from {intermediate_dir} to staging tables...")
-        # TODO: Use psycopg2's `copy_expert` to run the COPY command for each CSV.
-        logger.info("Bulk load to staging complete.")
+        """Loads data from CSV files into staging tables using COPY."""
+        logger.info(f"Bulk loading data from {intermediate_dir} into staging tables...")
+        # Map CSV filenames to their target staging tables
+        file_to_table_map = {
+            "products.csv": "products_staging",
+            "ingredients.csv": "ingredients_staging",
+            "packaging.csv": "packaging_staging",
+            "marketing_status.csv": "marketing_status_staging",
+            "product_ndcs.csv": "product_ndcs_staging",
+            "spl_raw_documents.csv": "spl_raw_documents_staging",
+        }
+
+        try:
+            with self._get_conn() as conn:
+                with conn.cursor() as cur:
+                    for filename, table_name in file_to_table_map.items():
+                        filepath = intermediate_dir / filename
+                        if not filepath.exists():
+                            logger.warning(
+                                f"Intermediate file {filepath} not found. Skipping."
+                            )
+                            continue
+
+                        logger.info(f"Loading {filename} into {table_name}...")
+                        # F007.1: Use copy_expert for efficient bulk loading
+                        sql = f"""
+                            COPY {table_name} FROM STDIN
+                            WITH (FORMAT CSV, NULL '\\N', QUOTE '\"');
+                        """
+                        with open(filepath, "r", encoding="utf-8") as f:
+                            cur.copy_expert(sql, f)
+                conn.commit()
+            logger.info("Bulk load to staging tables complete.")
+        except (psycopg2.Error, IOError) as e:
+            logger.error(f"Bulk load to staging failed: {e}")
+            if self.conn:
+                self.conn.rollback()
+            raise
 
     def pre_load_optimization(self) -> None:
         logger.info(
@@ -80,12 +115,48 @@ class PostgresLoader(DatabaseLoader):
         logger.info("Pre-load optimizations complete.")
 
     def merge_from_staging(self, mode: Literal["full-load", "delta-load"]) -> None:
-        logger.info(f"Merging data from staging to production tables (mode: {mode})...")
-        # TODO:
-        # If 'full-load': TRUNCATE production tables and INSERT from staging.
-        # If 'delta-load': Use INSERT ... ON CONFLICT (UPSERT) logic.
-        # This must be done in a single transaction (F006.3).
-        logger.info("Merge complete.")
+        """
+        Merges data from staging to production tables.
+        For this implementation, we only support 'full-load'.
+        """
+        logger.info(f"Merging data from staging to production (mode: {mode})...")
+        if mode != "full-load":
+            logger.warning(f"Merge mode '{mode}' is not yet implemented. Skipping.")
+            return
+
+        # List of tables to truncate and load, in order of dependency
+        tables = [
+            "product_ndcs",
+            "ingredients",
+            "packaging",
+            "marketing_status",
+            "products",
+            "spl_raw_documents",
+        ]
+
+        try:
+            with self._get_conn() as conn:
+                with conn.cursor() as cur:
+                    # F006.3: This block is executed in a single transaction
+                    logger.info("Truncating production tables...")
+                    for table in tables:
+                        cur.execute(f"TRUNCATE TABLE {table} CASCADE;")
+
+                    logger.info("Inserting data from staging tables...")
+                    for table in reversed(tables):  # Insert in reverse order
+                        cur.execute(f"INSERT INTO {table} SELECT * FROM {table}_staging;")
+
+                    logger.info("Truncating staging tables after merge...")
+                    for table in tables:
+                        cur.execute(f"TRUNCATE TABLE {table}_staging;")
+
+                conn.commit()
+            logger.info("Merge from staging to production complete.")
+        except psycopg2.Error as e:
+            logger.error(f"Merge from staging failed: {e}")
+            if self.conn:
+                self.conn.rollback()
+            raise
 
     def post_load_cleanup(self) -> None:
         logger.info("Performing post-load cleanup (rebuilding indexes, analyzing)...")
