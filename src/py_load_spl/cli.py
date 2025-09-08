@@ -1,11 +1,14 @@
 import logging
 import tempfile
+import zipfile
 from pathlib import Path
+from typing import List
 
 import typer
 from rich.console import Console
 
 from . import __name__ as app_name
+from .acquisition import Archive
 from .config import get_settings
 from .parsing import iter_spl_files
 from .transformation import Transformer
@@ -153,19 +156,72 @@ def full_load(
 
 
 @app.command()
-def delta_load(
-    ctx: typer.Context,
-    source: str | None = typer.Option(
-        None, help="Local path to SPL archives instead of downloading."
-    ),
-) -> None:
+def delta_load(ctx: typer.Context) -> None:
     """
     F008.3: Perform an incremental (delta) load.
-    (Not yet implemented)
+    Downloads new SPL archives, processes them one by one, and loads the data
+    into the database using an UPSERT strategy.
     """
+    settings = ctx.obj
     console.print("[bold blue]Starting delta data load...[/bold blue]")
-    console.print("[yellow]Note: Delta load is not yet implemented.[/yellow]")
-    console.print("[bold blue]Delta data load complete.[/bold blue]")
+    run_id = None
+    try:
+        # 1. Acquisition: Find and download new archives
+        console.print("[cyan]Step 1: Acquiring new archives...[/cyan]")
+        newly_downloaded_archives: List[Archive] = download_spl_archives()
+        if not newly_downloaded_archives:
+            console.print("[green]No new archives to process. Database is up to date.[/green]")
+            return
+
+        # Initialize the loader once
+        loader = PostgresLoader(settings.db)
+        run_id = loader.start_run(mode="delta-load")
+        total_archives_processed = 0
+
+        # Process each archive individually
+        for archive in newly_downloaded_archives:
+            console.print(f"--> Processing archive: [bold]{archive['name']}[/bold]")
+            try:
+                with tempfile.TemporaryDirectory() as xml_dir_str, tempfile.TemporaryDirectory() as csv_dir_str:
+                    xml_dir = Path(xml_dir_str)
+                    csv_dir = Path(csv_dir_str)
+
+                    # 2. Unzip archive
+                    console.print(f"    Unzipping {archive['name']}...")
+                    download_path = Path(settings.download_path) / archive["name"]
+                    with zipfile.ZipFile(download_path, "r") as zip_ref:
+                        zip_ref.extractall(xml_dir)
+
+                    # 3. Transform
+                    console.print("    Parsing and Transforming XML to CSV...")
+                    parsed_stream = iter_spl_files(xml_dir)
+                    transformer = Transformer(output_dir=csv_dir)
+                    transformer.transform_stream(parsed_stream)
+
+                    # 4. Load
+                    console.print("    Loading data into database...")
+                    loader.bulk_load_to_staging(csv_dir)
+                    loader.merge_from_staging(mode="delta-load")
+
+                    # 5. Record success for this archive
+                    loader.record_processed_archive(archive["name"], archive["checksum"])
+                    console.print(f"    [green]Successfully processed {archive['name']}[/green]")
+                    total_archives_processed += 1
+
+            except Exception as e:
+                console.print(f"    [bold red]Failed to process archive {archive['name']}. Error: {e}[/bold red]")
+                # Continue to the next archive
+                continue
+
+        loader.end_run(run_id, "SUCCESS", archives_processed=total_archives_processed)
+        console.print("[bold green]Delta load process finished successfully.[/bold green]")
+
+    except Exception as e:
+        console.print(f"[bold red]An error occurred during the delta load process: {e}[/bold red]")
+        if run_id:
+            # This assumes loader was initialized
+            PostgresLoader(settings.db).end_run(run_id, "FAILED", error_log=str(e))
+        raise typer.Exit(1)
 
 
 if __name__ == "__main__":

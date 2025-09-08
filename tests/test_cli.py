@@ -66,9 +66,27 @@ HTML_FIXTURE = """
 import logging
 
 
-@pytest.mark.integration
+@pytest.fixture
+def mock_db_loader(monkeypatch: pytest.MonkeyPatch):
+    """Fixture to mock the PostgresLoader to avoid real DB connections."""
+
+    class MockLoader:
+        def __init__(self, db_settings: DatabaseSettings):
+            # We accept the settings but ignore them for the mock.
+            pass
+
+        def get_processed_archives(self):
+            # Return an empty set to simulate no archives being processed yet
+            return set()
+
+    monkeypatch.setattr("py_load_spl.acquisition.PostgresLoader", MockLoader)
+
+
 def test_download_command(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    mock_db_loader: None,  # Activate the fixture
 ) -> None:
     """
     Test the 'download' command runs and successfully downloads a mock file.
@@ -102,7 +120,7 @@ def test_download_command(
 
     # Assert success
     assert result.exit_code == 0, f"CLI command failed with output:\n{result.output}"
-    assert "Successfully downloaded and verified" in caplog.text
+    assert "Data acquisition step completed. Downloaded 1 files." in caplog.text
     assert archive_name in caplog.text
 
     # Verify the file was created

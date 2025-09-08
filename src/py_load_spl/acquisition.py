@@ -16,6 +16,7 @@ from rich.progress import (
 )
 
 from py_load_spl.config import Settings, get_settings
+from py_load_spl.db.postgres import PostgresLoader
 
 logger = logging.getLogger(__name__)
 
@@ -123,26 +124,63 @@ def download_archive(archive: Archive, settings: Settings) -> Path:
         raise
 
 
-def download_spl_archives() -> None:
+def download_spl_archives() -> List[Archive]:
     """
     Main function for F001: Data Acquisition.
-    Downloads the smallest daily update file as a demonstration.
+
+    Performs a stateful download of SPL archives. It fetches the list of
+    available archives, compares it against previously processed archives
+    stored in the database, and downloads only the new ones.
+
+    Returns:
+        A list of Archive objects that were newly downloaded.
     """
-    logger.info("Starting SPL data acquisition...")
+    logger.info("Starting stateful SPL data acquisition...")
     settings = get_settings()
-    archive_list = get_archive_list(settings)
 
-    # For demonstration, find and download one of the smallest daily archives
-    target_archive_name = "dm_spl_daily_update_09022025.zip"
-    target_archive = next((a for a in archive_list if a["name"] == target_archive_name), None)
+    # Instantiate loader to get state from the database.
+    # In a larger application, this might be handled by dependency injection.
+    loader = PostgresLoader(settings.db)
+    try:
+        processed_archives_names = loader.get_processed_archives()
+    except Exception as e:
+        logger.error(
+            f"Could not connect to DB to get processed archives. Aborting. Error: {e}"
+        )
+        return []
 
-    if target_archive:
+    # Get all available archives from the source
+    all_available_archives = get_archive_list(settings)
+    if not all_available_archives:
+        logger.warning("No archives found at source. Nothing to download.")
+        return []
+
+    # Determine which archives are new
+    all_available_archives_map = {a["name"]: a for a in all_available_archives}
+    new_archive_names = set(all_available_archives_map.keys()) - processed_archives_names
+
+    if not new_archive_names:
+        logger.info("No new archives to download. Database is up to date.")
+        return []
+
+    logger.info(f"Found {len(new_archive_names)} new archives to download.")
+
+    # Download each new archive
+    downloaded_archives: List[Archive] = []
+    # Sort for deterministic download order, useful for testing/logging
+    for name in sorted(list(new_archive_names)):
+        archive_to_download = all_available_archives_map[name]
         try:
-            download_archive(target_archive, settings)
-            logger.info("Successfully downloaded and verified %s.", target_archive_name)
+            download_archive(archive_to_download, settings)
+            downloaded_archives.append(archive_to_download)
         except Exception as e:
-            logger.error("An error occurred during download: %s", e, exc_info=True)
-    else:
-        logger.warning("Could not find the target archive %s for download.", target_archive_name)
+            logger.error(
+                f"Failed to download archive {name}. Skipping. Error: {e}", exc_info=True
+            )
+            # Continue to the next file
+            continue
 
-    logger.info("Data acquisition download step completed.")
+    logger.info(
+        f"Data acquisition step completed. Downloaded {len(downloaded_archives)} files."
+    )
+    return downloaded_archives

@@ -67,6 +67,45 @@ class PostgresLoader(DatabaseLoader):
                 self.conn.rollback()
             raise
 
+    def get_processed_archives(self) -> set[str]:
+        """Retrieves the set of already processed archive names from the database."""
+        logger.info("Fetching list of processed archives from the database...")
+        sql = "SELECT archive_name FROM etl_processed_archives;"
+        try:
+            with self._get_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(sql)
+                    # Use a set comprehension for efficiency
+                    processed_archives = {row[0] for row in cur.fetchall()}
+            logger.info(f"Found {len(processed_archives)} previously processed archives.")
+            return processed_archives
+        except psycopg2.Error as e:
+            logger.error(f"Failed to fetch processed archives: {e}")
+            # In case of an error, assume no archives have been processed
+            # to avoid missing data, though this could lead to reprocessing.
+            return set()
+
+    def record_processed_archive(self, archive_name: str, checksum: str) -> None:
+        """Inserts or updates a record for a successfully processed archive."""
+        logger.info(f"Recording '{archive_name}' as processed.")
+        sql = """
+            INSERT INTO etl_processed_archives (archive_name, archive_checksum, processed_timestamp)
+            VALUES (%s, %s, NOW())
+            ON CONFLICT (archive_name) DO UPDATE SET
+                archive_checksum = EXCLUDED.archive_checksum,
+                processed_timestamp = EXCLUDED.processed_timestamp;
+        """
+        try:
+            with self._get_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(sql, (archive_name, checksum))
+                conn.commit()
+        except psycopg2.Error as e:
+            logger.error(f"Failed to record processed archive {archive_name}: {e}")
+            if self.conn:
+                self.conn.rollback()
+            raise
+
     def bulk_load_to_staging(self, intermediate_dir: Path) -> None:
         """Loads data from CSV files into staging tables using COPY."""
         logger.info(f"Bulk loading data from {intermediate_dir} into staging tables...")
@@ -118,14 +157,11 @@ class PostgresLoader(DatabaseLoader):
         """
         Merges data from staging to production tables.
         For 'full-load', it truncates production tables and inserts from staging.
+        For 'delta-load', it performs an UPSERT and replaces child records.
         """
         logger.info(f"Merging data from staging to production (mode: {mode})...")
-        if mode != "full-load":
-            logger.warning(f"Merge mode '{mode}' is not yet implemented. Skipping.")
-            return
 
         # The order is important to respect foreign key constraints.
-        # Truncate from child to parent, insert from parent to child.
         tables_in_dependency_order = [
             "spl_raw_documents",
             "products",
@@ -139,20 +175,51 @@ class PostgresLoader(DatabaseLoader):
             with self._get_conn() as conn:
                 with conn.cursor() as cur:
                     # This block is executed in a single transaction (F006.3)
-                    logger.info("Disabling triggers for session...")
+                    logger.info("Disabling triggers for session for performance...")
                     cur.execute("SET session_replication_role = 'replica';")
 
-                    logger.info("Truncating production tables...")
-                    for table in reversed(tables_in_dependency_order):
-                        logger.debug(f"Truncating {table}...")
-                        cur.execute(f"TRUNCATE TABLE {table} CASCADE;")
+                    if mode == "full-load":
+                        logger.info("Truncating production tables for full load...")
+                        for table in reversed(tables_in_dependency_order):
+                            logger.debug(f"Truncating {table}...")
+                            cur.execute(f"TRUNCATE TABLE {table} CASCADE;")
 
-                    logger.info("Inserting data from staging into production tables...")
-                    for table in tables_in_dependency_order:
-                        logger.debug(f"Loading data into {table}...")
-                        cur.execute(f"INSERT INTO {table} SELECT * FROM {table}_staging;")
+                        logger.info("Inserting all data from staging...")
+                        for table in tables_in_dependency_order:
+                            logger.debug(f"Loading data into {table}...")
+                            cur.execute(f"INSERT INTO {table} SELECT * FROM {table}_staging;")
 
-                    logger.info("Truncating staging tables after merge...")
+                    elif mode == "delta-load":
+                        logger.info("Performing delta merge (UPSERT)...")
+                        # 1. UPSERT spl_raw_documents
+                        update_cols_raw = ["set_id", "version_number", "effective_time", "raw_data", "source_filename", "loaded_at"]
+                        update_clause_raw = ", ".join([f"{col} = EXCLUDED.{col}" for col in update_cols_raw])
+                        cur.execute(f"""
+                            INSERT INTO spl_raw_documents SELECT * FROM spl_raw_documents_staging
+                            ON CONFLICT (document_id) DO UPDATE SET {update_clause_raw};
+                        """)
+
+                        # 2. UPSERT products
+                        update_cols_prod = ["set_id", "version_number", "effective_time", "product_name", "manufacturer_name", "dosage_form", "route_of_administration", "is_latest_version", "loaded_at"]
+                        update_clause_prod = ", ".join([f"{col} = EXCLUDED.{col}" for col in update_cols_prod])
+                        cur.execute(f"""
+                            INSERT INTO products SELECT * FROM products_staging
+                            ON CONFLICT (document_id) DO UPDATE SET {update_clause_prod};
+                        """)
+
+                        # 3. DELETE-INSERT for child tables
+                        cur.execute("SELECT DISTINCT document_id FROM products_staging;")
+                        doc_ids_to_update = tuple([row[0] for row in cur.fetchall()])
+
+                        if doc_ids_to_update:
+                            child_tables = ["product_ndcs", "ingredients", "packaging", "marketing_status"]
+                            for table in child_tables:
+                                logger.debug(f"Replacing child records in {table} for updated documents...")
+                                cur.execute(f"DELETE FROM {table} WHERE document_id IN %s;", (doc_ids_to_update,))
+                                cur.execute(f"INSERT INTO {table} SELECT * FROM {table}_staging;")
+
+                    # Truncate all staging tables after the merge is complete
+                    logger.info("Truncating staging tables...")
                     for table in tables_in_dependency_order:
                         cur.execute(f"TRUNCATE TABLE {table}_staging;")
 
