@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any, Literal
+from typing import Literal
 
 
 class DatabaseLoader(ABC):
@@ -24,7 +24,7 @@ class DatabaseLoader(ABC):
         pass
 
     @abstractmethod
-    def pre_load_optimization(self) -> None:
+    def pre_load_optimization(self, mode: Literal["full-load", "delta-load"]) -> None:
         """Optional: Drop indexes, disable constraints (for full loads)."""
         pass
 
@@ -37,7 +37,7 @@ class DatabaseLoader(ABC):
         pass
 
     @abstractmethod
-    def post_load_cleanup(self) -> None:
+    def post_load_cleanup(self, mode: Literal["full-load", "delta-load"]) -> None:
         """Optional: Rebuild indexes, enable constraints, vacuum/analyze."""
         pass
 

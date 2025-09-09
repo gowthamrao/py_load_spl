@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 from collections import defaultdict
 from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, IO, Type
+from typing import IO, Any
 from uuid import UUID
 
 import pyarrow as pa
@@ -24,7 +24,7 @@ from .models import (
 logger = logging.getLogger(__name__)
 
 # A mapping from our Pydantic models to the output filenames (without extension).
-MODEL_TO_FILENAME_MAP: dict[Type[BaseModel], str] = {
+MODEL_TO_FILENAME_MAP: dict[type[BaseModel], str] = {
     Product: "products",
     Ingredient: "ingredients",
     Packaging: "packaging",
@@ -34,6 +34,7 @@ MODEL_TO_FILENAME_MAP: dict[Type[BaseModel], str] = {
 }
 
 # --- Writer Abstraction ---
+
 
 class FileWriter(ABC):
     """Abstract base class for file writers."""
@@ -147,6 +148,7 @@ class ParquetWriter(FileWriter):
 
 # --- Transformer ---
 
+
 class Transformer:
     """
     Implements the transformation logic (F003, F005).
@@ -170,7 +172,9 @@ class Transformer:
             for i, record in enumerate(parsed_data_stream):
                 doc_id = record.get("document_id")
                 if not doc_id:
-                    logger.warning(f"Skipping record due to missing document_id: {record}")
+                    logger.warning(
+                        f"Skipping record due to missing document_id: {record}"
+                    )
                     continue
 
                 try:
@@ -188,7 +192,9 @@ class Transformer:
                         writer.write(ProductNdc(document_id=doc_id, **ndc_data))
 
                 except Exception as e:
-                    logger.error(f"Failed to transform record with doc_id {doc_id}. Error: {e}")
+                    logger.error(
+                        f"Failed to transform record with doc_id {doc_id}. Error: {e}"
+                    )
                     continue
 
                 if (i + 1) % 1000 == 0:

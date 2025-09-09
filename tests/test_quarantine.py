@@ -1,7 +1,7 @@
+from pathlib import Path
+
 import pytest
 from typer.testing import CliRunner
-from pathlib import Path
-import logging
 
 from py_load_spl.cli import app
 from py_load_spl.config import Settings
@@ -45,14 +45,28 @@ SAMPLE_XML_CONTENT_BAD = """<?xml version="1.0" encoding="UTF-8"?>
 
 class MockLoader:
     """A mock loader that does nothing but allows the CLI to run."""
+
     def __init__(self, db_settings):
         pass
-    def start_run(self, mode): return 1
-    def end_run(self, *args, **kwargs): pass
-    def pre_load_optimization(self, mode): pass
-    def bulk_load_to_staging(self, intermediate_dir): pass
-    def merge_from_staging(self, mode): pass
-    def post_load_cleanup(self, mode): pass
+
+    def start_run(self, mode):
+        return 1
+
+    def end_run(self, *args, **kwargs):
+        pass
+
+    def pre_load_optimization(self, mode):
+        pass
+
+    def bulk_load_to_staging(self, intermediate_dir):
+        pass
+
+    def merge_from_staging(self, mode):
+        pass
+
+    def post_load_cleanup(self, mode):
+        pass
+
 
 @pytest.fixture
 def mock_db_and_settings(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
@@ -63,6 +77,7 @@ def mock_db_and_settings(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     monkeypatch.setattr("py_load_spl.cli.get_settings", lambda: test_settings)
     monkeypatch.setattr("py_load_spl.cli.PostgresLoader", MockLoader)
     return test_settings
+
 
 def test_full_load_quarantines_bad_xml(
     tmp_path: Path,

@@ -1,5 +1,6 @@
-import pytest
 from pathlib import Path
+
+import pytest
 
 from py_load_spl.parsing import parse_spl_file
 
@@ -23,6 +24,9 @@ def sample_spl_file(tmp_path: Path) -> Path:
             <name>JULAMYCIN</name>
           </genericMedicine>
         </asEntityWithGeneric>
+        <asEquivalentEntity>
+            <code code="12345-678" codeSystem="2.16.840.1.113883.6.69" />
+        </asEquivalentEntity>
         <ingredient classCode="ACT">
           <quantity>
             <numerator value="100" unit="mg" />
@@ -174,7 +178,9 @@ def test_parsing_multiple_marketing_statuses(spl_file_with_multiple_statuses: Pa
     assert len(parsed_data["marketing_status"]) == 2
 
     # Sort by start_date for predictable order
-    statuses = sorted(parsed_data["marketing_status"], key=lambda x: x.get("start_date"))
+    statuses = sorted(
+        parsed_data["marketing_status"], key=lambda x: x.get("start_date")
+    )
 
     assert statuses[0]["marketing_category"] == "completed"
     assert statuses[0]["start_date"] == "20240101"

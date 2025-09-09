@@ -1,7 +1,8 @@
 import logging
+from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Generator, Literal
+from typing import Any, Literal
 
 import psycopg2
 from psycopg2.extensions import connection
@@ -79,7 +80,9 @@ class PostgresLoader(DatabaseLoader):
                     cur.execute(sql)
                     # Use a set comprehension for efficiency
                     processed_archives = {row[0] for row in cur.fetchall()}
-            logger.info(f"Found {len(processed_archives)} previously processed archives.")
+            logger.info(
+                f"Found {len(processed_archives)} previously processed archives."
+            )
             return processed_archives
         except psycopg2.Error as e:
             logger.error(f"Failed to fetch processed archives: {e}")
@@ -148,11 +151,11 @@ class PostgresLoader(DatabaseLoader):
                             COPY {table_name} {column_spec} FROM STDIN
                             WITH (FORMAT CSV, NULL '\\N', QUOTE '\"');
                         """
-                        with open(filepath, "r", encoding="utf-8") as f:
+                        with open(filepath, encoding="utf-8") as f:
                             cur.copy_expert(sql, f)
                 conn.commit()
             logger.info("Bulk load to staging tables complete.")
-        except (psycopg2.Error, IOError) as e:
+        except (OSError, psycopg2.Error) as e:
             logger.error(f"Bulk load to staging failed: {e}")
             if self.conn:
                 self.conn.rollback()
@@ -199,7 +202,9 @@ class PostgresLoader(DatabaseLoader):
             logger.warning("No optimizable objects found to drop.")
             return
 
-        logger.info(f"Dropping {len(self.dropped_object_definitions)} indexes and foreign keys...")
+        logger.info(
+            f"Dropping {len(self.dropped_object_definitions)} indexes and foreign keys..."
+        )
         # Drop foreign keys first
         cur.execute("""
             SELECT 'ALTER TABLE ' || n.nspname || '."' || conrel.relname || '" DROP CONSTRAINT "' || c.conname || '";'
@@ -235,7 +240,9 @@ class PostgresLoader(DatabaseLoader):
             logger.warning("No stored object definitions to recreate.")
             return
 
-        logger.info(f"Recreating {len(self.dropped_object_definitions)} indexes and foreign keys...")
+        logger.info(
+            f"Recreating {len(self.dropped_object_definitions)} indexes and foreign keys..."
+        )
         for definition in self.dropped_object_definitions:
             logger.debug(f"Executing: {definition}")
             cur.execute(definition)
@@ -301,40 +308,79 @@ class PostgresLoader(DatabaseLoader):
                         logger.info("Inserting all data from staging...")
                         for table in tables_in_dependency_order:
                             logger.debug(f"Loading data into {table}...")
-                            cur.execute(f"INSERT INTO {table} SELECT * FROM {table}_staging;")
+                            cur.execute(
+                                f"INSERT INTO {table} SELECT * FROM {table}_staging;"
+                            )
 
                     elif mode == "delta-load":
                         logger.info("Performing delta merge (UPSERT)...")
                         # 1. UPSERT spl_raw_documents
-                        update_cols_raw = ["set_id", "version_number", "effective_time", "raw_data", "source_filename", "loaded_at"]
-                        update_clause_raw = ", ".join([f"{col} = EXCLUDED.{col}" for col in update_cols_raw])
+                        update_cols_raw = [
+                            "set_id",
+                            "version_number",
+                            "effective_time",
+                            "raw_data",
+                            "source_filename",
+                            "loaded_at",
+                        ]
+                        update_clause_raw = ", ".join(
+                            [f"{col} = EXCLUDED.{col}" for col in update_cols_raw]
+                        )
                         cur.execute(f"""
                             INSERT INTO spl_raw_documents SELECT * FROM spl_raw_documents_staging
                             ON CONFLICT (document_id) DO UPDATE SET {update_clause_raw};
                         """)
 
                         # 2. UPSERT products
-                        update_cols_prod = ["set_id", "version_number", "effective_time", "product_name", "manufacturer_name", "dosage_form", "route_of_administration", "is_latest_version", "loaded_at"]
-                        update_clause_prod = ", ".join([f"{col} = EXCLUDED.{col}" for col in update_cols_prod])
+                        update_cols_prod = [
+                            "set_id",
+                            "version_number",
+                            "effective_time",
+                            "product_name",
+                            "manufacturer_name",
+                            "dosage_form",
+                            "route_of_administration",
+                            "is_latest_version",
+                            "loaded_at",
+                        ]
+                        update_clause_prod = ", ".join(
+                            [f"{col} = EXCLUDED.{col}" for col in update_cols_prod]
+                        )
                         cur.execute(f"""
                             INSERT INTO products SELECT * FROM products_staging
                             ON CONFLICT (document_id) DO UPDATE SET {update_clause_prod};
                         """)
 
                         # 3. DELETE-INSERT for child tables
-                        cur.execute("SELECT DISTINCT document_id FROM products_staging;")
+                        cur.execute(
+                            "SELECT DISTINCT document_id FROM products_staging;"
+                        )
                         doc_ids_to_update = tuple([row[0] for row in cur.fetchall()])
 
                         if doc_ids_to_update:
-                            child_tables = ["product_ndcs", "ingredients", "packaging", "marketing_status"]
+                            child_tables = [
+                                "product_ndcs",
+                                "ingredients",
+                                "packaging",
+                                "marketing_status",
+                            ]
                             for table in child_tables:
-                                logger.debug(f"Replacing child records in {table} for updated documents...")
-                                cur.execute(f"DELETE FROM {table} WHERE document_id IN %s;", (doc_ids_to_update,))
-                                cur.execute(f"INSERT INTO {table} SELECT * FROM {table}_staging;")
+                                logger.debug(
+                                    f"Replacing child records in {table} for updated documents..."
+                                )
+                                cur.execute(
+                                    f"DELETE FROM {table} WHERE document_id IN %s;",
+                                    (doc_ids_to_update,),
+                                )
+                                cur.execute(
+                                    f"INSERT INTO {table} SELECT * FROM {table}_staging;"
+                                )
 
                     # Final step: Update the is_latest_version flag for all affected products.
                     # This is done for both full and delta loads to ensure consistency.
-                    logger.info("Updating is_latest_version flag for all affected products...")
+                    logger.info(
+                        "Updating is_latest_version flag for all affected products..."
+                    )
                     cur.execute("""
                         WITH affected_set_ids AS (
                             SELECT DISTINCT set_id FROM products_staging
@@ -421,7 +467,11 @@ class PostgresLoader(DatabaseLoader):
             raise
 
     def end_run(
-        self, run_id: int, status: str, records_loaded: int = 0, error_log: str | None = None
+        self,
+        run_id: int,
+        status: str,
+        records_loaded: int = 0,
+        error_log: str | None = None,
     ) -> None:
         """Updates the etl_load_history record for the completed run."""
         logger.info(f"Ending ETL run {run_id} with status: {status}")

@@ -1,8 +1,8 @@
-import pytest
-from unittest.mock import MagicMock, patch
 import tempfile
 from pathlib import Path
-import os
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 from py_load_spl.config import DatabaseSettings
 from py_load_spl.db.postgres import PostgresLoader
@@ -82,7 +82,10 @@ def test_full_etl_pipeline_mocked(mock_psycopg2):
     Verifies that the correct data is generated and that the loader methods
     are called as expected.
     """
-    with tempfile.TemporaryDirectory() as source_dir_str, tempfile.TemporaryDirectory() as output_dir_str:
+    with (
+        tempfile.TemporaryDirectory() as source_dir_str,
+        tempfile.TemporaryDirectory() as output_dir_str,
+    ):
         source_dir = Path(source_dir_str)
         output_dir = Path(output_dir_str)
 
@@ -109,7 +112,6 @@ def test_full_etl_pipeline_mocked(mock_psycopg2):
         loader.start_run = MagicMock(return_value=1)
         loader.end_run = MagicMock()
 
-
         # 2. Act: Run the E-T-L process
         # Mimic the parallel execution logic from the CLI
         xml_files = list(source_dir.glob("*.xml"))
@@ -131,7 +133,7 @@ def test_full_etl_pipeline_mocked(mock_psycopg2):
         # Assert that the CSV was created correctly with the new field
         products_csv = output_dir / "products.csv"
         assert products_csv.exists()
-        with open(products_csv, "r") as f:
+        with open(products_csv) as f:
             content = f.read()
             # The order of columns in the model is: document_id, set_id, version_number,
             # effective_time, product_name, manufacturer_name, dosage_form, route_of_administration
@@ -148,8 +150,14 @@ def test_full_etl_pipeline_mocked(mock_psycopg2):
         assert mock_cur.copy_expert.call_count > 0
         # Check that merge_from_staging was called (via execute)
         # It should truncate tables and then insert into them
-        truncate_calls = [call for call in mock_cur.execute.call_args_list if "TRUNCATE" in call[0][0]]
-        insert_calls = [call for call in mock_cur.execute.call_args_list if "INSERT INTO" in call[0][0]]
+        truncate_calls = [
+            call for call in mock_cur.execute.call_args_list if "TRUNCATE" in call[0][0]
+        ]
+        insert_calls = [
+            call
+            for call in mock_cur.execute.call_args_list
+            if "INSERT INTO" in call[0][0]
+        ]
         assert len(truncate_calls) > 0
         assert len(insert_calls) > 0
         print("Verified that database loader methods were called.")
@@ -164,9 +172,10 @@ def test_full_load_pipeline_with_postgres_container(monkeypatch):
     - Runs the 'full-load' CLI command against the test database.
     - Connects to the database to verify the data was loaded correctly.
     """
+    import psycopg2
     from testcontainers.postgres import PostgresContainer
     from typer.testing import CliRunner
-    import psycopg2
+
     from py_load_spl.cli import app
 
     runner = CliRunner()
@@ -220,7 +229,9 @@ def test_full_load_pipeline_with_postgres_container(monkeypatch):
             # Check products table
             cur.execute("SELECT COUNT(*) FROM products;")
             assert cur.fetchone()[0] == 1
-            cur.execute("SELECT product_name, dosage_form, route_of_administration FROM products;")
+            cur.execute(
+                "SELECT product_name, dosage_form, route_of_administration FROM products;"
+            )
             product_row = cur.fetchone()
             assert product_row[0] == "Jules's Sample Drug"
             assert product_row[1] == "TABLET"

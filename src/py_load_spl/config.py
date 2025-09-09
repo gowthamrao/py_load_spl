@@ -33,7 +33,9 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     data_dir: str = "data"
     # The FRD requires a configurable download source (F001.1)
-    fda_source_url: HttpUrl = "https://dailymed.nlm.nih.gov/dailymed/spl-resources-all-drug-labels.cfm"  # type: ignore
+    fda_source_url: HttpUrl = (
+        "https://dailymed.nlm.nih.gov/dailymed/spl-resources-all-drug-labels.cfm"  # type: ignore
+    )
     download_path: str = "data/downloads"
     quarantine_path: str = Field(
         default="data/quarantine",

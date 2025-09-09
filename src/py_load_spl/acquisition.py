@@ -2,7 +2,6 @@ import hashlib
 import logging
 import re
 from pathlib import Path
-from typing import List
 
 import requests
 from bs4 import BeautifulSoup
@@ -22,7 +21,7 @@ from .models import Archive
 logger = logging.getLogger(__name__)
 
 
-def get_archive_list(settings: Settings) -> List[Archive]:
+def get_archive_list(settings: Settings) -> list[Archive]:
     """
     Scrapes the DailyMed SPL download page to get a list of all available archives.
     """
@@ -35,7 +34,7 @@ def get_archive_list(settings: Settings) -> List[Archive]:
         raise
 
     soup = BeautifulSoup(response.content, "lxml")
-    archives: List[Archive] = []
+    archives: list[Archive] = []
 
     # Find all list items in the download sections
     for li in soup.select("ul.download > li"):
@@ -60,7 +59,10 @@ def get_archive_list(settings: Settings) -> List[Archive]:
             )
 
     if not archives:
-        logger.warning("Could not find any archives on the page. The page structure may have changed.")
+        logger.warning(
+            "Could not find any archives on the page. "
+            "The page structure may have changed."
+        )
     else:
         logger.info("Found %d archives to process.", len(archives))
     return archives
@@ -93,7 +95,9 @@ def download_archive(archive: Archive, settings: Settings) -> Path:
         with requests.get(archive.url, stream=True, timeout=300) as r:
             r.raise_for_status()
             total_size = int(r.headers.get("content-length", 0))
-            task_id = progress.add_task("download", total=total_size, filename=archive.name)
+            task_id = progress.add_task(
+                "download", total=total_size, filename=archive.name
+            )
             with open(file_path, "wb") as f, progress:
                 for chunk in r.iter_content(chunk_size=8192):
                     f.write(chunk)
@@ -117,7 +121,7 @@ def download_archive(archive: Archive, settings: Settings) -> Path:
         raise
 
 
-def download_spl_archives(loader: DatabaseLoader) -> List[Archive]:
+def download_spl_archives(loader: DatabaseLoader) -> list[Archive]:
     """
     Main function for F001: Data Acquisition.
 
@@ -150,7 +154,9 @@ def download_spl_archives(loader: DatabaseLoader) -> List[Archive]:
 
     # Determine which archives are new
     all_available_archives_map = {a.name: a for a in all_available_archives}
-    new_archive_names = set(all_available_archives_map.keys()) - processed_archives_names
+    new_archive_names = (
+        set(all_available_archives_map.keys()) - processed_archives_names
+    )
 
     if not new_archive_names:
         logger.info("No new archives to download. Database is up to date.")
@@ -159,21 +165,70 @@ def download_spl_archives(loader: DatabaseLoader) -> List[Archive]:
     logger.info(f"Found {len(new_archive_names)} new archives to download.")
 
     # Download each new archive
-    downloaded_archives: List[Archive] = []
+    downloaded_archives: list[Archive] = []
     # Sort for deterministic download order, useful for testing/logging
-    for name in sorted(list(new_archive_names)):
+    for name in sorted(new_archive_names):
         archive_to_download = all_available_archives_map[name]
         try:
             download_archive(archive_to_download, settings)
             downloaded_archives.append(archive_to_download)
         except Exception as e:
             logger.error(
-                f"Failed to download archive {name}. Skipping. Error: {e}", exc_info=True
+                f"Failed to download archive {name}. Skipping. Error: {e}",
+                exc_info=True,
             )
             # Continue to the next file
             continue
 
     logger.info(
         f"Data acquisition step completed. Downloaded {len(downloaded_archives)} files."
+    )
+    return downloaded_archives
+
+
+def download_all_archives(settings: Settings | None = None) -> list[Archive]:
+    """
+    Main function for downloading ALL SPL archives for a full load.
+
+    This is a non-stateful download. It gets the full list of archives
+    from the FDA source and attempts to download every single one.
+
+    Returns:
+        A list of Archive objects that were newly downloaded.
+    """
+    logger.info("Starting download of all SPL data for full load...")
+    if settings is None:
+        settings = get_settings()
+
+    # Get all available archives from the source
+    all_available_archives = get_archive_list(settings)
+    if not all_available_archives:
+        logger.warning("No archives found at source. Nothing to download.")
+        return []
+
+    logger.info(f"Found {len(all_available_archives)} total archives to download.")
+
+    # Download each archive
+    downloaded_archives: list[Archive] = []
+    # Sort for deterministic download order, useful for testing/logging
+    for archive_to_download in sorted(all_available_archives, key=lambda a: a.name):
+        try:
+            download_archive(archive_to_download, settings)
+            downloaded_archives.append(archive_to_download)
+        except Exception as e:
+            logger.error(
+                (
+                    f"Failed to download archive {archive_to_download.name}. "
+                    f"Skipping. Error: {e}"
+                ),
+                exc_info=True,
+            )
+            # Continue to the next file
+            continue
+
+    logger.info(
+        "Full data acquisition step completed. Downloaded %d of %d files.",
+        len(downloaded_archives),
+        len(all_available_archives),
     )
     return downloaded_archives
