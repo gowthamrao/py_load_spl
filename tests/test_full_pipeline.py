@@ -26,9 +26,51 @@ SAMPLE_XML_WITH_ROUTE = """<?xml version="1.0" encoding="UTF-8"?>
             <name>JULAMYCIN</name>
           </genericMedicine>
         </asEntityWithGeneric>
+        <ingredient classCode="ACT">
+          <quantity>
+            <numerator value="100" unit="mg" />
+            <denominator value="1" unit="TABLET" />
+          </quantity>
+          <ingredientSubstance>
+            <name>JULESTAT</name>
+            <code code="UNII-JULE" displayName="JULESTAT" />
+          </ingredientSubstance>
+        </ingredient>
       </manufacturedProduct>
+      <manufacturer>
+        <name>Jules Pharmaceuticals</name>
+      </manufacturer>
     </manufacturedProduct>
   </subject>
+  <component>
+    <structuredBody>
+      <component>
+        <section ID="s2">
+          <code code="51945-4" displayName="PACKAGE LABEL.PRINCIPAL DISPLAY PANEL" />
+          <text>
+            Some text here that the old parser might have used.
+          </text>
+          <component>
+            <section>
+                <part>
+                  <code code="12345-678-90" displayName="NDC" />
+                  <name>30 Tablets in 1 Bottle</name>
+                  <formCode code="C43182" displayName="BOTTLE" />
+                </part>
+            </section>
+          </component>
+          <subject>
+            <marketingAct>
+              <statusCode code="active"/>
+              <effectiveTime>
+                <low value="20250101"/>
+              </effectiveTime>
+            </marketingAct>
+          </subject>
+        </section>
+      </component>
+    </structuredBody>
+  </component>
 </document>
 """
 
@@ -103,3 +145,82 @@ def test_full_etl_pipeline_mocked(mock_psycopg2):
         assert len(truncate_calls) > 0
         assert len(insert_calls) > 0
         print("Verified that database loader methods were called.")
+
+
+@pytest.mark.integration
+def test_full_load_pipeline_with_postgres_container(monkeypatch):
+    """
+    A true end-to-end integration test for the 'full-load' command.
+    - Spins up a real PostgreSQL database in a Docker container.
+    - Creates a sample SPL XML file.
+    - Runs the 'full-load' CLI command against the test database.
+    - Connects to the database to verify the data was loaded correctly.
+    """
+    from testcontainers.postgres import PostgresContainer
+    from typer.testing import CliRunner
+    import psycopg2
+    from py_load_spl.cli import app
+
+    runner = CliRunner()
+
+    with PostgresContainer("postgres:15-alpine") as postgres_container:
+        # Get connection details from the container
+        db_settings = postgres_container.get_connection_url()
+        db_name = db_settings.split("/")[-1]
+        db_user = postgres_container.username
+        db_password = postgres_container.password
+        db_host = postgres_container.get_container_host_ip()
+        db_port = postgres_container.get_exposed_port(5432)
+
+        # Set environment variables for the CLI app to use
+        monkeypatch.setenv("DB_ADAPTER", "postgresql")
+        monkeypatch.setenv("DB_HOST", db_host)
+        monkeypatch.setenv("DB_PORT", db_port)
+        monkeypatch.setenv("DB_USER", db_user)
+        monkeypatch.setenv("DB_PASSWORD", db_password)
+        monkeypatch.setenv("DB_NAME", db_name)
+
+        # 1. Arrange: Initialize the schema
+        result_init = runner.invoke(app, ["init"])
+        assert result_init.exit_code == 0
+        assert "Schema initialization complete" in result_init.stdout
+
+        # Create a temporary directory with a sample XML file
+        with tempfile.TemporaryDirectory() as source_dir_str:
+            source_dir = Path(source_dir_str)
+            xml_file = source_dir / "sample.xml"
+            # Using the same sample XML from the mocked test
+            xml_file.write_text(SAMPLE_XML_WITH_ROUTE)
+
+            # 2. Act: Run the full-load command
+            result_load = runner.invoke(app, ["full-load", "--source", str(source_dir)])
+            if result_load.exit_code != 0:
+                print(f"CLI Error Output:\n{result_load.stdout}")
+            assert result_load.exit_code == 0
+            assert "Full load process finished successfully" in result_load.stdout
+
+            # 3. Assert: Connect to the database and verify the data
+            conn = psycopg2.connect(
+                host=db_host,
+                port=db_port,
+                user=db_user,
+                password=db_password,
+                dbname=db_name,
+            )
+            cur = conn.cursor()
+
+            # Check products table
+            cur.execute("SELECT COUNT(*) FROM products;")
+            assert cur.fetchone()[0] == 1
+            cur.execute("SELECT product_name, dosage_form, route_of_administration FROM products;")
+            product_row = cur.fetchone()
+            assert product_row[0] == "Jules's Sample Drug"
+            assert product_row[1] == "TABLET"
+            assert product_row[2] == "ORAL"
+
+            # Check spl_raw_documents table
+            cur.execute("SELECT COUNT(*) FROM spl_raw_documents;")
+            assert cur.fetchone()[0] == 1
+
+            cur.close()
+            conn.close()

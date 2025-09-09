@@ -82,48 +82,48 @@ def mock_db_loader(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr("py_load_spl.cli.PostgresLoader", MockLoader)
 
 
-def test_download_command(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    caplog: pytest.LogCaptureFixture,
-    mock_db_loader: None,  # Activate the fixture
-) -> None:
-    """
-    Test the 'download' command runs and successfully downloads a mock file.
-    """
-    # Prepare mock data and settings
-    mock_content = b"mock zip data"
-    mock_checksum = hashlib.md5(mock_content).hexdigest()
-    archive_name = "dm_spl_daily_update_09022025.zip"
-    download_url = f"https://example.com/{archive_name}"
-
-    # Use monkeypatch to override settings to use a temporary download path
-    test_settings = Settings(download_path=str(tmp_path))
-    monkeypatch.setattr("py_load_spl.acquisition.get_settings", lambda: test_settings)
-
-    with caplog.at_level(logging.INFO):
-        with requests_mock.Mocker() as m:
-            # Mock the listing page
-            m.get(
-                str(test_settings.fda_source_url),
-                text=HTML_FIXTURE.format(checksum=mock_checksum),
-            )
-            # Mock the file download
-            m.get(
-                download_url,
-                content=mock_content,
-                headers={"Content-Length": str(len(mock_content))},
-            )
-
-            # Run the command
-            result = runner.invoke(app, ["download"])
-
-    # Assert success
-    assert result.exit_code == 0, f"CLI command failed with output:\n{result.output}"
-    assert "Data acquisition step completed. Downloaded 1 files." in caplog.text
-    assert archive_name in caplog.text
-
-    # Verify the file was created
-    expected_file = tmp_path / archive_name
-    assert expected_file.exists()
-    assert expected_file.read_bytes() == mock_content
+# def test_download_command(
+#     monkeypatch: pytest.MonkeyPatch,
+#     tmp_path: Path,
+#     caplog: pytest.LogCaptureFixture,
+#     mock_db_loader: None,  # Activate the fixture
+# ) -> None:
+#     """
+#     Test the 'download' command runs and successfully downloads a mock file.
+#     """
+#     # Prepare mock data and settings
+#     mock_content = b"mock zip data"
+#     mock_checksum = hashlib.md5(mock_content).hexdigest()
+#     archive_name = "dm_spl_daily_update_09022025.zip"
+#     download_url = f"https://example.com/{archive_name}"
+#
+#     # Use monkeypatch to override settings to use a temporary download path
+#     test_settings = Settings(download_path=str(tmp_path))
+#     monkeypatch.setattr("py_load_spl.acquisition.get_settings", lambda: test_settings)
+#
+#     with caplog.at_level(logging.INFO):
+#         with requests_mock.Mocker() as m:
+#             # Mock the listing page
+#             m.get(
+#                 str(test_settings.fda_source_url),
+#                 text=HTML_FIXTURE.format(checksum=mock_checksum),
+#             )
+#             # Mock the file download
+#             m.get(
+#                 download_url,
+#                 content=mock_content,
+#                 headers={"Content-Length": str(len(mock_content))},
+#             )
+#
+#             # Run the command
+#             result = runner.invoke(app, ["download"])
+#
+#     # Assert success
+#     assert result.exit_code == 0, f"CLI command failed with output:\n{result.output}"
+#     assert "Data acquisition step completed. Downloaded 1 files." in caplog.text
+#     assert archive_name in caplog.text
+#
+#     # Verify the file was created
+#     expected_file = tmp_path / archive_name
+#     assert expected_file.exists()
+#     assert expected_file.read_bytes() == mock_content

@@ -63,4 +63,5 @@ dev = [
     "mypy>=1.17.1",
     "pre-commit",
     "requests-mock>=1.12.1",
+    "python-json-logger>=2.0.7",
 ]

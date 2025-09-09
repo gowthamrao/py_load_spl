@@ -131,9 +131,19 @@ class PostgresLoader(DatabaseLoader):
                             continue
 
                         logger.info(f"Loading {filename} into {table_name}...")
+                        # Define the columns for tables where we are not providing the surrogate key
+                        # The order must match the Pydantic model field order.
+                        table_columns = {
+                            "ingredients_staging": "(document_id, ingredient_name, substance_code, strength_numerator, strength_denominator, unit_of_measure, is_active_ingredient)",
+                            "packaging_staging": "(document_id, package_ndc, package_description, package_type)",
+                            "marketing_status_staging": "(document_id, marketing_category, start_date, end_date)",
+                            "product_ndcs_staging": "(document_id, ndc_code)",
+                        }
+                        column_spec = table_columns.get(table_name, "")
+
                         # F007.1: Use copy_expert for efficient bulk loading
                         sql = f"""
-                            COPY {table_name} FROM STDIN
+                            COPY {table_name} {column_spec} FROM STDIN
                             WITH (FORMAT CSV, NULL '\\N', QUOTE '\"');
                         """
                         with open(filepath, "r", encoding="utf-8") as f:
