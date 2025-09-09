@@ -1,16 +1,13 @@
-[build-system]
-requires = ["pdm-pep517>=1.0"]
-build-backend = "pdm.pep517.api"
-
 [project]
-name = "py-load-spl"
+name = "app"
 version = "0.1.0"
-description = "An open-source Python package for FDA SPL data loading"
+description = "Default template for PDM package"
 authors = [
     {name = "Gowtham Rao", email = "rao@ohdsi.org"},
+    {name = "google-labs-jules[bot]", email = "161369871+google-labs-jules[bot]@users.noreply.github.com"},
 ]
-requires-python = ">=3.10"
-license = {text = "Apache-2.0"}
+requires-python = "==3.12.*"
+license = {text = "MIT"}
 dependencies = [
     "lxml>=6.0.1",
     "requests>=2.32.5",
@@ -20,7 +17,9 @@ dependencies = [
     "typer>=0.17.4",
     "beautifulsoup4>=4.13.5",
     "python-json-logger>=2.0.7",
+    "pyarrow>=21.0.0",
 ]
+readme = "README.md"
 
 [project.optional-dependencies]
 postgresql = ["psycopg2-binary"]
@@ -48,10 +47,16 @@ addopts = "-ra -q"
 testpaths = [
     "tests",
 ]
+pythonpath = [
+    "src"
+]
 markers = [
     "integration: marks tests as integration tests that require external services",
 ]
 
+
+[tool.pdm]
+distribution = false
 [dependency-groups]
 dev = [
     "pytest>=8.4.2",

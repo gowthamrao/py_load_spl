@@ -7,7 +7,7 @@ import os
 from py_load_spl.config import DatabaseSettings
 from py_load_spl.db.postgres import PostgresLoader
 from py_load_spl.parsing import parse_spl_file
-from py_load_spl.transformation import Transformer
+from py_load_spl.transformation import CsvWriter, Transformer
 
 SAMPLE_XML_WITH_ROUTE = """<?xml version="1.0" encoding="UTF-8"?>
 <document xmlns="urn:hl7-org:v3">
@@ -115,7 +115,8 @@ def test_full_etl_pipeline_mocked(mock_psycopg2):
         xml_files = list(source_dir.glob("*.xml"))
         parsed_stream = map(parse_spl_file, xml_files)
 
-        transformer = Transformer(output_dir)
+        writer = CsvWriter(output_dir)
+        transformer = Transformer(writer)
         stats = transformer.transform_stream(parsed_stream)
 
         loader.initialize_schema()

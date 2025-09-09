@@ -1,5 +1,6 @@
 import logging
 import os
+from typing import Literal
 
 from pydantic import Field, HttpUrl
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -43,6 +44,11 @@ class Settings(BaseSettings):
         default_factory=os.cpu_count,
         description="Number of parallel processes for parsing. Defaults to number of CPUs.",
         env="MAX_WORKERS",
+    )
+    intermediate_format: Literal["csv", "parquet"] = Field(
+        default="csv",
+        description="The file format for intermediate data files.",
+        env="INTERMEDIATE_FORMAT",
     )
 
 
