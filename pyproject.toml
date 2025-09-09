@@ -17,6 +17,7 @@ dependencies = [
     "beautifulsoup4>=4.13.5",
     "python-json-logger>=2.0.7",
     "pyarrow>=21.0.0",
+    "xmltodict>=0.15.1",
 ]
 readme = "README.md"
 
