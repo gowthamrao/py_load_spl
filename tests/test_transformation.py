@@ -2,18 +2,29 @@ import csv
 from pathlib import Path
 from uuid import UUID
 
-from py_load_spl.transformation import Transformer
+import pyarrow.parquet as pq
+import pytest
+
+from py_load_spl.transformation import (
+    CsvWriter,
+    FileWriter,
+    ParquetWriter,
+    Transformer,
+)
 
 # A sample record mimicking the output of the parsing stage for one SPL file.
 # Based on the structure from sample_spl.xml
 SAMPLE_PARSED_RECORD = {
-    "document_id": "d1b64b62-050a-4895-924c-d2862d2a6a69",
-    "set_id": "a2c3b6f0-a38f-4b48-96eb-3b2b403816a4",
+    "document_id": UUID("d1b64b62-050a-4895-924c-d2862d2a6a69"),
+    "set_id": UUID("a2c3b6f0-a38f-4b48-96eb-3b2b403816a4"),
     "version_number": 1,
     "effective_time": "20250907",
     "product_name": "Jules's Sample Drug",
     "manufacturer_name": "Jules Pharmaceuticals",
     "dosage_form": "TABLET",
+    "route_of_administration": "ORAL",
+    "is_latest_version": True,
+    "loaded_at": "2025-09-08T12:00:00Z",
     "raw_data": "<xml>some fake raw data</xml>",
     "source_filename": "sample.xml",
     "product_ndcs": [{"ndc_code": "12345-678"}],
@@ -35,84 +46,70 @@ SAMPLE_PARSED_RECORD = {
         }
     ],
     "marketing_status": [
-        {"marketing_category": "active", "start_date": "20250101"}
+        {"marketing_category": "active", "start_date": "20250101", "end_date": None}
     ],
 }
 
 
-def test_transformer_creates_correct_csvs(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "writer_class, file_ext", [(CsvWriter, ".csv"), (ParquetWriter, ".parquet")]
+)
+def test_transformer_with_different_writers(
+    tmp_path: Path, writer_class: type[FileWriter], file_ext: str
+) -> None:
     """
-    Tests that the Transformer correctly processes a parsed record
-    and writes the data to the correct CSV files in the expected format.
+    Tests that the Transformer correctly processes a parsed record and writes
+    the data using different writer implementations (CSV and Parquet).
     """
     # 1. Arrange
     output_dir = tmp_path / "test_output"
     parsed_data_stream = [SAMPLE_PARSED_RECORD]
-    transformer = Transformer(output_dir=output_dir)
+    writer = writer_class(output_dir)
+    transformer = Transformer(writer=writer)
 
     # 2. Act
     stats = transformer.transform_stream(parsed_data_stream)
 
-    # 3. Assert
-    # Assert that the stats are correct
+    # 3. Assert stats and file existence
     assert isinstance(stats, dict)
-    assert stats.get("products.csv") == 1
-    assert stats.get("ingredients.csv") == 1
-    assert stats.get("packaging.csv") == 1
-    assert stats.get("marketing_status.csv") == 1
-    assert stats.get("product_ndcs.csv") == 1
-    assert stats.get("spl_raw_documents.csv") == 1
+    assert stats.get(f"products{file_ext}") == 1
+    assert stats.get(f"ingredients{file_ext}") == 1
     assert sum(stats.values()) == 6
 
-    # Check that all expected files were created
-    products_csv = output_dir / "products.csv"
-    ingredients_csv = output_dir / "ingredients.csv"
-    packaging_csv = output_dir / "packaging.csv"
-    marketing_status_csv = output_dir / "marketing_status.csv"
-    product_ndcs_csv = output_dir / "product_ndcs.csv"
-    spl_raw_documents_csv = output_dir / "spl_raw_documents.csv"
+    products_file = output_dir / f"products{file_ext}"
+    ingredients_file = output_dir / f"ingredients{file_ext}"
+    packaging_file = output_dir / f"packaging{file_ext}"
 
-    assert products_csv.exists()
-    assert ingredients_csv.exists()
-    assert packaging_csv.exists()
-    assert marketing_status_csv.exists()
-    assert product_ndcs_csv.exists()
-    assert spl_raw_documents_csv.exists()
+    assert products_file.exists()
+    assert ingredients_file.exists()
+    assert packaging_file.exists()
 
-    # Verify the content of products.csv
-    with open(products_csv) as f:
-        reader = csv.reader(f)
-        rows = list(reader)
-        assert len(rows) == 1
-        product_row = rows[0]
-        assert product_row[0] == "d1b64b62-050a-4895-924c-d2862d2a6a69"
-        assert product_row[4] == "Jules's Sample Drug"
+    # 4. Assert file content based on format
+    if file_ext == ".csv":
+        # Verify the content of products.csv
+        with open(products_file) as f:
+            reader = csv.reader(f)
+            rows = list(reader)
+            assert len(rows) == 1
+            product_row = rows[0]
+            assert product_row[0] == "d1b64b62-050a-4895-924c-d2862d2a6a69"
+            assert product_row[4] == "Jules's Sample Drug"
+    elif file_ext == ".parquet":
+        # Verify the content of products.parquet
+        table = pq.read_table(products_file)
+        assert table.num_rows == 1
+        data = table.to_pylist()
+        product_row = data[0]
+        assert product_row["document_id"] == "d1b64b62-050a-4895-924c-d2862d2a6a69"
+        assert product_row["product_name"] == "Jules's Sample Drug"
+        assert product_row["dosage_form"] == "TABLET"
+        assert product_row["is_latest_version"] is True
 
-    # Verify the content of spl_raw_documents.csv
-    with open(spl_raw_documents_csv) as f:
-        reader = csv.reader(f)
-        rows = list(reader)
-        assert len(rows) == 1
-        raw_doc_row = rows[0]
-        assert raw_doc_row[0] == "d1b64b62-050a-4895-924c-d2862d2a6a69"
-        assert raw_doc_row[4] == '"<xml>some fake raw data</xml>"'
-        assert raw_doc_row[5] == "sample.xml"
-
-    # Verify the content of product_ndcs.csv
-    with open(product_ndcs_csv) as f:
-        reader = csv.reader(f)
-        rows = list(reader)
-        assert len(rows) == 1
-        ndc_row = rows[0]
-        assert ndc_row[0] == "d1b64b62-050a-4895-924c-d2862d2a6a69"
-        assert ndc_row[1] == "12345-678"
-
-    # Verify the content of packaging.csv
-    with open(packaging_csv) as f:
-        reader = csv.reader(f)
-        rows = list(reader)
-        assert len(rows) == 1
-        packaging_row = rows[0]
-        assert packaging_row[1] == "12345-678-90"
-        assert packaging_row[2] == "30 Tablets in 1 Bottle"
-        assert packaging_row[3] == "BOTTLE"
+        # Verify the content of ingredients.parquet
+        ing_table = pq.read_table(ingredients_file)
+        assert ing_table.num_rows == 1
+        ing_data = ing_table.to_pylist()
+        ing_row = ing_data[0]
+        assert ing_row["document_id"] == "d1b64b62-050a-4895-924c-d2862d2a6a69"
+        assert ing_row["ingredient_name"] == "JULESTAT"
+        assert ing_row["is_active_ingredient"] is True

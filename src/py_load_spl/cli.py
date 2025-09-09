@@ -12,8 +12,13 @@ from . import __name__ as app_name
 from .config import Settings, get_settings
 from .db.base import DatabaseLoader
 from .db.postgres import PostgresLoader
-from .parsing import SplParsingError, parse_spl_file
-from .transformation import Transformer
+from .parsing import parse_spl_file
+from .transformation import (
+    CsvWriter,
+    FileWriter,
+    ParquetWriter,
+    Transformer,
+)
 from .util import setup_logging
 
 app = typer.Typer(name=app_name)
@@ -29,19 +34,46 @@ def main(
     log_format: str = typer.Option(
         "json", help="Set the log format ('json' or 'text').", envvar="LOG_FORMAT"
     ),
+    intermediate_format: str = typer.Option(
+        "csv",
+        help="Format for intermediate files ('csv' or 'parquet').",
+        envvar="INTERMEDIATE_FORMAT",
+    ),
 ) -> None:
     """A CLI for the SPL Data Loader."""
+    # Note: intermediate_format is also handled by Pydantic, but adding it here
+    # makes it easily discoverable via --help.
     setup_logging(log_level, log_format)
-    ctx.obj = get_settings()
+    settings = get_settings()
+    # Allow CLI option to override environment variable for format
+    if intermediate_format in ["csv", "parquet"]:
+        settings.intermediate_format = intermediate_format
+    ctx.obj = settings
     if ctx.invoked_subcommand is None:
         console.print("[bold red]No command specified. Use --help for options.[/bold red]")
 
 
-def get_db_loader(settings) -> DatabaseLoader:
+def get_db_loader(settings: Settings) -> DatabaseLoader:
     if settings.db.adapter == "postgresql":
         return PostgresLoader(settings.db)
     else:
         console.print(f"[bold red]Error: Unsupported DB adapter '{settings.db.adapter}'[/bold red]")
+        raise typer.Exit(1)
+
+
+def get_file_writer(settings: Settings, output_dir: Path) -> FileWriter:
+    """Instantiates the correct file writer based on settings."""
+    if settings.intermediate_format == "parquet":
+        console.print("[bold blue]Using Parquet format for intermediate files.[/bold blue]")
+        return ParquetWriter(output_dir)
+    elif settings.intermediate_format == "csv":
+        console.print("[bold blue]Using CSV format for intermediate files.[/bold blue]")
+        return CsvWriter(output_dir)
+    else:
+        # This case should be prevented by Pydantic validation, but as a safeguard:
+        console.print(
+            f"[bold red]Error: Unsupported intermediate format '{settings.intermediate_format}'[/bold red]"
+        )
         raise typer.Exit(1)
 
 
@@ -50,22 +82,19 @@ def _quarantine_and_parse_in_parallel(
 ):
     """
     Parses a list of XML files in parallel, quarantining any file that fails.
-
     Yields successfully parsed data dictionaries.
     """
     futures = {executor.submit(parse_spl_file, file): file for file in xml_files}
     quarantined_count = 0
 
     for future in as_completed(futures):
-        source_file_path = futures[future]  # Get the path associated with this future
+        source_file_path = futures[future]
         try:
             yield future.result()
-        except Exception as e:  # Catch ANY exception from the parsing process
+        except Exception as e:
             quarantine_dir = Path(settings.quarantine_path)
             quarantine_dir.mkdir(parents=True, exist_ok=True)
             target_path = quarantine_dir / source_file_path.name
-
-            # Ensure the source file still exists before trying to move
             if source_file_path.exists():
                 shutil.move(str(source_file_path), str(target_path))
                 quarantined_count += 1
@@ -87,7 +116,7 @@ def _quarantine_and_parse_in_parallel(
 def init(ctx: typer.Context) -> None:
     """F008.3: Initialize the database schema."""
     console.print("[bold green]Initializing database schema...[/bold green]")
-    settings = ctx.obj
+    settings: Settings = ctx.obj
     loader = get_db_loader(settings)
     try:
         loader.initialize_schema()
@@ -110,7 +139,7 @@ def full_load(
     ),
 ) -> None:
     """F008.3: Perform a full data load from a local directory."""
-    settings = ctx.obj
+    settings: Settings = ctx.obj
     console.print(f"[bold cyan]Starting full data load from '{source}'...[/bold cyan]")
     loader = get_db_loader(settings)
     run_id = None
@@ -118,7 +147,9 @@ def full_load(
         run_id = loader.start_run(mode="full-load")
         with tempfile.TemporaryDirectory() as temp_dir_str:
             output_dir = Path(temp_dir_str)
-            console.print(f"Intermediate CSV files will be stored in: {output_dir}")
+            console.print(f"Intermediate files will be stored in: {output_dir}")
+
+            writer = get_file_writer(settings, output_dir)
 
             console.print("[cyan]Step 1: Finding XML files...[/cyan]")
             xml_files = list(source.glob("**/*.xml"))
@@ -133,7 +164,7 @@ def full_load(
                 parsed_data_stream = _quarantine_and_parse_in_parallel(
                     xml_files, settings, executor
                 )
-                transformer = Transformer(output_dir=output_dir)
+                transformer = Transformer(writer=writer)
                 stats = transformer.transform_stream(parsed_data_stream)
 
             console.print("[green]Parsing and Transformation complete.[/green]")
@@ -163,7 +194,7 @@ from .util import unzip_archive
 @app.command()
 def delta_load(ctx: typer.Context) -> None:
     """F008.3: Perform an incremental (delta) load from the FDA source."""
-    settings = ctx.obj
+    settings: Settings = ctx.obj
     console.print("[bold cyan]Starting delta data load from FDA source...[/bold cyan]")
     loader = get_db_loader(settings)
     run_id = None
@@ -171,30 +202,26 @@ def delta_load(ctx: typer.Context) -> None:
     try:
         run_id = loader.start_run(mode="delta-load")
 
-        # Step 1: Download new archives
         console.print("[cyan]Step 1: Checking for and downloading new archives...[/cyan]")
         downloaded_archives = download_spl_archives(loader)
         if not downloaded_archives:
             console.print("[green]No new archives found. Database is up-to-date.[/green]")
             loader.end_run(run_id, "SUCCESS", 0)
             return
-
         console.print(f"[green]Downloaded {len(downloaded_archives)} new archive(s).[/green]")
 
-        # Create temporary directories for processing
         with tempfile.TemporaryDirectory() as xml_temp_dir_str, \
-             tempfile.TemporaryDirectory() as csv_temp_dir_str:
+             tempfile.TemporaryDirectory() as intermediate_dir_str:
 
             xml_temp_dir = Path(xml_temp_dir_str)
-            csv_temp_dir = Path(csv_temp_dir_str)
+            intermediate_dir = Path(intermediate_dir_str)
+            writer = get_file_writer(settings, intermediate_dir)
 
-            # Step 2: Unzip all archives
             console.print(f"[cyan]Step 2: Extracting XML files to {xml_temp_dir}...[/cyan]")
             for archive in downloaded_archives:
                 archive_path = Path(settings.download_path) / archive.name
                 unzip_archive(archive_path, xml_temp_dir)
 
-            # Step 3: Transform XMLs to CSVs
             console.print(f"[cyan]Step 3: Finding XML files in {xml_temp_dir}...[/cyan]")
             xml_files = list(xml_temp_dir.glob("**/*.xml"))
             console.print(f"Found {len(xml_files)} XML files to process.")
@@ -208,32 +235,28 @@ def delta_load(ctx: typer.Context) -> None:
                 parsed_data_stream = _quarantine_and_parse_in_parallel(
                     xml_files, settings, executor
                 )
-                transformer = Transformer(output_dir=csv_temp_dir)
+                transformer = Transformer(writer=writer)
                 stats = transformer.transform_stream(parsed_data_stream)
             console.print("[green]Parsing and Transformation complete.[/green]")
 
-            # Step 5: Load data into database
             console.print("[cyan]Step 5: Loading data into database...[/cyan]")
             loader.pre_load_optimization(mode="delta-load")
-            loader.bulk_load_to_staging(csv_temp_dir)
+            loader.bulk_load_to_staging(intermediate_dir)
             loader.merge_from_staging("delta-load")
             loader.post_load_cleanup(mode="delta-load")
             console.print("[green]Database loading complete.[/green]")
 
-            # Step 6: Record processed archives
             console.print("[cyan]Step 6: Recording processed archives in database...[/cyan]")
             for archive in downloaded_archives:
                 loader.record_processed_archive(archive.name, archive.checksum)
 
         if run_id:
-            # Use the stats from the transformer for a more accurate count
             total_records = sum(stats.values()) if stats else 0
             loader.end_run(run_id, "SUCCESS", total_records)
         console.print("[bold green]Delta load process finished successfully.[/bold green]")
 
     except Exception as e:
         console.print(f"[bold red]An error occurred during the delta load process: {e}[/bold red]")
-        # Also log the traceback for debugging
         logging.getLogger(__name__).exception("Delta load failed")
         if run_id:
             loader.end_run(run_id, "FAILED", 0, str(e))
