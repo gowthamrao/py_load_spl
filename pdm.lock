@@ -5,7 +5,7 @@
 groups = ["default", "dev", "postgresql"]
 strategy = ["inherit_metadata"]
 lock_version = "4.5.0"
-content_hash = "sha256:612b88b8f1f068c35bd06de3de492126832caaa3369a3b65557ae01eff3af3b0"
+content_hash = "sha256:5102965f9b3019fd03dc351e1f766c5d043da49b2307d8ed060d9343da3c5297"
 
 [[metadata.targets]]
 requires_python = ">=3.10"
@@ -948,6 +948,20 @@ groups = ["default", "dev"]
 files = [
     {file = "python_dotenv-1.1.1-py3-none-any.whl", hash = "sha256:31f23644fe2602f88ff55e1f5c79ba497e01224ee7737937930c448e4d0e24dc"},
     {file = "python_dotenv-1.1.1.tar.gz", hash = "sha256:a8a6399716257f45be6a007360200409fce5cda2661e3dec71d23dc15f6189ab"},
+]
+
+[[package]]
+name = "python-json-logger"
+version = "3.3.0"
+requires_python = ">=3.8"
+summary = "JSON Log Formatter for the Python Logging Package"
+groups = ["default"]
+dependencies = [
+    "typing-extensions; python_version < \"3.10\"",
+]
+files = [
+    {file = "python_json_logger-3.3.0-py3-none-any.whl", hash = "sha256:dd980fae8cffb24c13caf6e158d3d61c0d6d22342f932cb6e9deedab3d35eec7"},
+    {file = "python_json_logger-3.3.0.tar.gz", hash = "sha256:12b7e74b17775e7d565129296105bbe3910842d9d0eb083fc83a6a617aa8df84"},
 ]
 
 [[package]]

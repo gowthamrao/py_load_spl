@@ -19,6 +19,7 @@ dependencies = [
     "pydantic-settings",
     "typer>=0.17.4",
     "beautifulsoup4>=4.13.5",
+    "python-json-logger>=2.0.7",
 ]
 
 [project.optional-dependencies]
