@@ -1,6 +1,7 @@
 import pytest
 import requests
 import requests_mock
+
 from py_load_spl.acquisition import get_archive_list
 from py_load_spl.config import Settings
 from py_load_spl.models import Archive
@@ -64,7 +65,9 @@ def test_get_archive_list_success():
     ]
 
     # Sort lists of Pydantic models to ensure comparison is order-independent
-    assert sorted(archives, key=lambda x: x.name) == sorted(expected_archives, key=lambda x: x.name)
+    assert sorted(archives, key=lambda x: x.name) == sorted(
+        expected_archives, key=lambda x: x.name
+    )
 
 
 def test_get_archive_list_http_error():
@@ -85,7 +88,9 @@ def test_get_archive_list_no_archives_found():
     """
     settings = Settings()
     with requests_mock.Mocker() as m:
-        m.get(str(settings.fda_source_url), text="<html><body>No links here</body></html>")
+        m.get(
+            str(settings.fda_source_url), text="<html><body>No links here</body></html>"
+        )
 
         archives = get_archive_list(settings)
         assert len(archives) == 0
@@ -93,6 +98,7 @@ def test_get_archive_list_no_archives_found():
 
 import hashlib
 from pathlib import Path
+
 from py_load_spl.acquisition import download_archive
 
 
@@ -111,7 +117,11 @@ def test_download_archive_success(tmp_path: Path):
     settings = Settings(download_path=str(tmp_path))
 
     with requests_mock.Mocker() as m:
-        m.get(archive.url, content=mock_content, headers={"Content-Length": str(len(mock_content))})
+        m.get(
+            archive.url,
+            content=mock_content,
+            headers={"Content-Length": str(len(mock_content))},
+        )
         result_path = download_archive(archive, settings)
 
     expected_path = tmp_path / archive.name

@@ -1,9 +1,9 @@
 import pytest
-from typer.testing import CliRunner
 from testcontainers.postgres import PostgresContainer
+from typer.testing import CliRunner
 
 from py_load_spl.cli import app
-from py_load_spl.config import Settings, DatabaseSettings
+from py_load_spl.config import DatabaseSettings, Settings
 
 runner = CliRunner()
 
@@ -39,13 +39,16 @@ def test_init_command(monkeypatch: pytest.MonkeyPatch) -> None:
         result = runner.invoke(app, ["init"])
 
         # Assert success
-        assert result.exit_code == 0, f"CLI command failed with output:\n{result.stdout}"
+        assert result.exit_code == 0, (
+            f"CLI command failed with output:\n{result.stdout}"
+        )
         assert "Initializing database schema" in result.stdout
         assert "Schema initialization complete" in result.stdout
 
 
 import hashlib
 from pathlib import Path
+
 import requests_mock
 
 # A simplified HTML fixture mimicking the structure of the DailyMed page
@@ -138,17 +141,23 @@ def mock_db_loader(monkeypatch: pytest.MonkeyPatch):
 #     assert expected_file.read_bytes() == mock_content
 
 
-def test_delta_load_no_new_archives(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture):
+def test_delta_load_no_new_archives(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+):
     """
     Tests that delta-load handles the case where no new archives are found.
     """
     # Mock the functions that would perform external actions
     mock_loader_instance = MockLoader(None)
     mock_loader_instance.start_run = lambda mode: 1
-    mock_loader_instance.end_run = lambda run_id, status, count: None
+    mock_loader_instance.end_run = lambda run_id, status, count, error_log: None
 
-    monkeypatch.setattr("py_load_spl.cli.get_db_loader", lambda settings: mock_loader_instance)
-    monkeypatch.setattr("py_load_spl.cli.download_spl_archives", lambda loader: []) # No new archives
+    monkeypatch.setattr(
+        "py_load_spl.cli.get_db_loader", lambda settings: mock_loader_instance
+    )
+    monkeypatch.setattr(
+        "py_load_spl.cli.download_spl_archives", lambda loader: []
+    )  # No new archives
 
     with caplog.at_level(logging.INFO):
         result = runner.invoke(app, ["delta-load"])
@@ -158,6 +167,7 @@ def test_delta_load_no_new_archives(monkeypatch: pytest.MonkeyPatch, caplog: pyt
 
 
 import zipfile
+
 import psycopg2
 
 SAMPLE_XML_CONTENT = """<?xml version="1.0" encoding="UTF-8"?>
@@ -222,7 +232,9 @@ def test_delta_load_end_to_end(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
         test_settings = Settings(db=test_db_settings, download_path=str(tmp_path))
 
         monkeypatch.setattr("py_load_spl.cli.get_settings", lambda: test_settings)
-        monkeypatch.setattr("py_load_spl.acquisition.get_settings", lambda: test_settings)
+        monkeypatch.setattr(
+            "py_load_spl.acquisition.get_settings", lambda: test_settings
+        )
 
         # 3. Run the 'init' command first to set up the schema
         init_result = runner.invoke(app, ["init"])
@@ -232,7 +244,9 @@ def test_delta_load_end_to_end(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
         with requests_mock.Mocker() as m:
             m.get(
                 str(test_settings.fda_source_url),
-                text=HTML_FIXTURE.format(checksum=mock_checksum).replace("09022025", "09092025"),
+                text=HTML_FIXTURE.format(checksum=mock_checksum).replace(
+                    "09022025", "09092025"
+                ),
             )
             m.get(
                 "https://example.com/dm_spl_daily_update_09092025.zip",
@@ -244,7 +258,9 @@ def test_delta_load_end_to_end(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
             delta_result = runner.invoke(app, ["delta-load"])
 
         # 6. Assertions
-        assert delta_result.exit_code == 0, f"CLI command failed with output:\n{delta_result.stdout}"
+        assert delta_result.exit_code == 0, (
+            f"CLI command failed with output:\n{delta_result.stdout}"
+        )
         assert "Delta load process finished successfully" in delta_result.stdout
 
         # 7. Verify data in the database directly
@@ -257,13 +273,17 @@ def test_delta_load_end_to_end(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
         )
         with conn.cursor() as cur:
             # Check that the archive was recorded
-            cur.execute("SELECT archive_name, archive_checksum FROM etl_processed_archives")
+            cur.execute(
+                "SELECT archive_name, archive_checksum FROM etl_processed_archives"
+            )
             processed_archive = cur.fetchone()
             assert processed_archive[0] == archive_name
             assert processed_archive[1] == mock_checksum
 
             # Check that the product was loaded
-            cur.execute("SELECT document_id, set_id, product_name, manufacturer_name, dosage_form FROM products")
+            cur.execute(
+                "SELECT document_id, set_id, product_name, manufacturer_name, dosage_form FROM products"
+            )
             product = cur.fetchone()
             assert str(product[0]) == "d1b64b62-050a-4895-924c-d2862d2a6a69"
             assert str(product[1]) == "a2c3b6f0-a38f-4b48-96eb-3b2b403816a4"

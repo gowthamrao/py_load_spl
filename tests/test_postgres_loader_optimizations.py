@@ -1,5 +1,5 @@
-import pytest
 import psycopg2
+import pytest
 from testcontainers.postgres import PostgresContainer
 
 from py_load_spl.config import DatabaseSettings
@@ -84,7 +84,6 @@ def test_full_load_optimization_lifecycle(loader: PostgresLoader):
     assert "idx_products_versioning" in initial_indexes
     # We already assert the count of FKs, checking for one specific name
     # is brittle, as was just proven. The count is sufficient.
-
 
     # 2. Act: Run the pre-load optimization
     loader.pre_load_optimization(mode="full-load")

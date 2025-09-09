@@ -9,6 +9,7 @@ import typer
 from rich.console import Console
 
 from . import __name__ as app_name
+from .acquisition import download_all_archives, download_spl_archives
 from .config import Settings, get_settings
 from .db.base import DatabaseLoader
 from .db.postgres import PostgresLoader
@@ -19,7 +20,7 @@ from .transformation import (
     ParquetWriter,
     Transformer,
 )
-from .util import setup_logging
+from .util import setup_logging, unzip_archive
 
 app = typer.Typer(name=app_name)
 console = Console()
@@ -50,21 +51,28 @@ def main(
         settings.intermediate_format = intermediate_format
     ctx.obj = settings
     if ctx.invoked_subcommand is None:
-        console.print("[bold red]No command specified. Use --help for options.[/bold red]")
+        console.print(
+            "[bold red]No command specified. Use --help for options.[/bold red]"
+        )
 
 
 def get_db_loader(settings: Settings) -> DatabaseLoader:
     if settings.db.adapter == "postgresql":
         return PostgresLoader(settings.db)
     else:
-        console.print(f"[bold red]Error: Unsupported DB adapter '{settings.db.adapter}'[/bold red]")
+        console.print(
+            f"[bold red]Error: Unsupported DB adapter "
+            f"'{settings.db.adapter}'[/bold red]"
+        )
         raise typer.Exit(1)
 
 
 def get_file_writer(settings: Settings, output_dir: Path) -> FileWriter:
     """Instantiates the correct file writer based on settings."""
     if settings.intermediate_format == "parquet":
-        console.print("[bold blue]Using Parquet format for intermediate files.[/bold blue]")
+        console.print(
+            "[bold blue]Using Parquet format for intermediate files.[/bold blue]"
+        )
         return ParquetWriter(output_dir)
     elif settings.intermediate_format == "csv":
         console.print("[bold blue]Using CSV format for intermediate files.[/bold blue]")
@@ -72,13 +80,16 @@ def get_file_writer(settings: Settings, output_dir: Path) -> FileWriter:
     else:
         # This case should be prevented by Pydantic validation, but as a safeguard:
         console.print(
-            f"[bold red]Error: Unsupported intermediate format '{settings.intermediate_format}'[/bold red]"
+            "[bold red]Error: Unsupported intermediate format "
+            f"'{settings.intermediate_format}'[/bold red]"
         )
         raise typer.Exit(1)
 
 
 def _quarantine_and_parse_in_parallel(
-    xml_files: list[Path], settings: Settings, executor: concurrent.futures.ProcessPoolExecutor
+    xml_files: list[Path],
+    settings: Settings,
+    executor: concurrent.futures.ProcessPoolExecutor,
 ):
     """
     Parses a list of XML files in parallel, quarantining any file that fails.
@@ -99,11 +110,15 @@ def _quarantine_and_parse_in_parallel(
                 shutil.move(str(source_file_path), str(target_path))
                 quarantined_count += 1
                 logging.warning(
-                    f"Moved corrupted file {source_file_path.name} to {target_path} due to parsing error: {e}"
+                    "Moved corrupted file %s to %s due to parsing error: %s",
+                    source_file_path.name,
+                    target_path,
+                    e,
                 )
             else:
                 logging.warning(
-                    f"Could not quarantine {source_file_path.name} as it was already moved or deleted."
+                    "Could not quarantine %s as it was already moved or deleted.",
+                    source_file_path.name,
                 )
 
     if quarantined_count > 0:
@@ -123,23 +138,11 @@ def init(ctx: typer.Context) -> None:
         console.print("[bold green]Schema initialization complete.[/bold green]")
     except Exception as e:
         console.print(f"[bold red]Schema initialization failed: {e}[/bold red]")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from e
 
 
-@app.command()
-def full_load(
-    ctx: typer.Context,
-    source: Path = typer.Option(
-        ...,
-        help="Local path to the directory containing SPL XML files.",
-        exists=True,
-        file_okay=False,
-        dir_okay=True,
-        readable=True,
-    ),
-) -> None:
-    """F008.3: Perform a full data load from a local directory."""
-    settings: Settings = ctx.obj
+def _run_full_load(settings: Settings, source: Path):
+    """The core logic for a full data load from a given source directory."""
     console.print(f"[bold cyan]Starting full data load from '{source}'...[/bold cyan]")
     loader = get_db_loader(settings)
     run_id = None
@@ -153,10 +156,21 @@ def full_load(
 
             console.print("[cyan]Step 1: Finding XML files...[/cyan]")
             xml_files = list(source.glob("**/*.xml"))
+            if not xml_files:
+                console.print(
+                    "[bold yellow]No XML files found in the source. "
+                    "Aborting.[/bold yellow]"
+                )
+                if run_id:
+                    loader.end_run(
+                        run_id, "SUCCESS", 0, None
+                    )  # End run with 0 records
+                return
             console.print(f"Found {len(xml_files)} XML files to process.")
 
             console.print(
-                f"[cyan]Step 2: Parsing and Transforming in parallel (max_workers={settings.max_workers})...[/cyan]"
+                "[cyan]Step 2: Parsing and Transforming in parallel "
+                f"(max_workers={settings.max_workers})...[/cyan]"
             )
             with concurrent.futures.ProcessPoolExecutor(
                 max_workers=settings.max_workers
@@ -178,17 +192,88 @@ def full_load(
 
         if run_id:
             total_records = sum(stats.values()) if stats else 0
-            loader.end_run(run_id, "SUCCESS", total_records)
-        console.print("[bold green]Full load process finished successfully.[/bold green]")
+            loader.end_run(run_id, "SUCCESS", total_records, None)
+        console.print(
+            "[bold green]Full load process finished successfully.[/bold green]"
+        )
     except Exception as e:
-        console.print(f"[bold red]An error occurred during the full load process: {e}[/bold red]")
+        console.print(
+            f"[bold red]An error occurred during the full load process: {e}[/bold red]"
+        )
         if run_id:
             loader.end_run(run_id, "FAILED", 0, str(e))
-        raise typer.Exit(1)
+        raise typer.Exit(1) from e
 
 
-from .acquisition import download_spl_archives
-from .util import unzip_archive
+@app.command()
+def full_load(
+    ctx: typer.Context,
+    source: Path | None = typer.Option(
+        None,
+        help=(
+            "Local path to SPL XML files. If not provided, all archives will be "
+            "downloaded from the FDA source."
+        ),
+        file_okay=False,
+        dir_okay=True,
+        readable=True,
+        resolve_path=True,
+    ),
+) -> None:
+    """
+    F008.3: Perform a full data load from a local directory or by downloading all
+    archives.
+    """
+    settings: Settings = ctx.obj
+
+    if source:
+        if not source.exists():
+            console.print(
+                f"[bold red]Error: Source path '{source}' does not exist.[/bold red]"
+            )
+            raise typer.Exit(1)
+        # Run the load process directly on the user-provided directory
+        _run_full_load(settings, source)
+    else:
+        # No source provided, so download everything.
+        console.print(
+            "[bold cyan]Step 0: No source path provided. Downloading all "
+            "archives from FDA source...[/bold cyan]"
+        )
+
+        with (
+            tempfile.TemporaryDirectory() as download_dir,
+            tempfile.TemporaryDirectory() as xml_dir,
+        ):
+            # Temporarily override download_path setting so archives go into our
+            # temp dir
+            original_download_path = settings.download_path
+            settings.download_path = download_dir
+
+            try:
+                downloaded_archives = download_all_archives(settings)
+
+                if not downloaded_archives:
+                    console.print(
+                        "[bold yellow]No archives were downloaded. "
+                        "Nothing to do.[/bold yellow]"
+                    )
+                    return
+
+                xml_dir_path = Path(xml_dir)
+                console.print(
+                    f"[cyan]Extracting {len(downloaded_archives)} archives to "
+                    f"{xml_dir_path}...[/cyan]"
+                )
+                for archive in downloaded_archives:
+                    archive_path = Path(settings.download_path) / archive.name
+                    unzip_archive(archive_path, xml_dir_path)
+
+                # Now run the load process on the extracted files
+                _run_full_load(settings, xml_dir_path)
+            finally:
+                # Always restore the original setting
+                settings.download_path = original_download_path
 
 
 @app.command()
@@ -202,32 +287,44 @@ def delta_load(ctx: typer.Context) -> None:
     try:
         run_id = loader.start_run(mode="delta-load")
 
-        console.print("[cyan]Step 1: Checking for and downloading new archives...[/cyan]")
+        console.print(
+            "[cyan]Step 1: Checking for and downloading new archives...[/cyan]"
+        )
         downloaded_archives = download_spl_archives(loader)
         if not downloaded_archives:
-            console.print("[green]No new archives found. Database is up-to-date.[/green]")
-            loader.end_run(run_id, "SUCCESS", 0)
+            console.print(
+                "[green]No new archives found. Database is up-to-date.[/green]"
+            )
+            loader.end_run(run_id, "SUCCESS", 0, None)
             return
-        console.print(f"[green]Downloaded {len(downloaded_archives)} new archive(s).[/green]")
+        console.print(
+            f"[green]Downloaded {len(downloaded_archives)} new archive(s).[/green]"
+        )
 
-        with tempfile.TemporaryDirectory() as xml_temp_dir_str, \
-             tempfile.TemporaryDirectory() as intermediate_dir_str:
-
+        with (
+            tempfile.TemporaryDirectory() as xml_temp_dir_str,
+            tempfile.TemporaryDirectory() as intermediate_dir_str,
+        ):
             xml_temp_dir = Path(xml_temp_dir_str)
             intermediate_dir = Path(intermediate_dir_str)
             writer = get_file_writer(settings, intermediate_dir)
 
-            console.print(f"[cyan]Step 2: Extracting XML files to {xml_temp_dir}...[/cyan]")
+            console.print(
+                f"[cyan]Step 2: Extracting XML files to {xml_temp_dir}...[/cyan]"
+            )
             for archive in downloaded_archives:
                 archive_path = Path(settings.download_path) / archive.name
                 unzip_archive(archive_path, xml_temp_dir)
 
-            console.print(f"[cyan]Step 3: Finding XML files in {xml_temp_dir}...[/cyan]")
+            console.print(
+                f"[cyan]Step 3: Finding XML files in {xml_temp_dir}...[/cyan]"
+            )
             xml_files = list(xml_temp_dir.glob("**/*.xml"))
             console.print(f"Found {len(xml_files)} XML files to process.")
 
             console.print(
-                f"[cyan]Step 4: Parsing and Transforming in parallel (max_workers={settings.max_workers})...[/cyan]"
+                "[cyan]Step 4: Parsing and Transforming in parallel "
+                f"(max_workers={settings.max_workers})...[/cyan]"
             )
             with concurrent.futures.ProcessPoolExecutor(
                 max_workers=settings.max_workers
@@ -246,21 +343,27 @@ def delta_load(ctx: typer.Context) -> None:
             loader.post_load_cleanup(mode="delta-load")
             console.print("[green]Database loading complete.[/green]")
 
-            console.print("[cyan]Step 6: Recording processed archives in database...[/cyan]")
+            console.print(
+                "[cyan]Step 6: Recording processed archives in database...[/cyan]"
+            )
             for archive in downloaded_archives:
                 loader.record_processed_archive(archive.name, archive.checksum)
 
         if run_id:
             total_records = sum(stats.values()) if stats else 0
-            loader.end_run(run_id, "SUCCESS", total_records)
-        console.print("[bold green]Delta load process finished successfully.[/bold green]")
+            loader.end_run(run_id, "SUCCESS", total_records, None)
+        console.print(
+            "[bold green]Delta load process finished successfully.[/bold green]"
+        )
 
     except Exception as e:
-        console.print(f"[bold red]An error occurred during the delta load process: {e}[/bold red]")
+        console.print(
+            f"[bold red]An error occurred during the delta load process: {e}[/bold red]"
+        )
         logging.getLogger(__name__).exception("Delta load failed")
         if run_id:
             loader.end_run(run_id, "FAILED", 0, str(e))
-        raise typer.Exit(1)
+        raise typer.Exit(1) from e
 
 
 if __name__ == "__main__":
