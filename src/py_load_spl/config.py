@@ -8,17 +8,22 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 logger = logging.getLogger(__name__)
 
 
+from typing import Optional
+
+
 class DatabaseSettings(BaseSettings):
     """Database connection settings."""
 
     model_config = SettingsConfigDict(env_prefix="DB_")
 
-    host: str = "localhost"
-    port: int = 5432
-    user: str = "postgres"
-    password: str = "postgres"
+    adapter: Literal["postgresql", "sqlite"] = "postgresql"
+    # For SQLite, 'name' is the file path. For Postgres, it's the database name.
     name: str = "spl_data"
-    adapter: str = "postgresql"
+    # The following are optional, mainly for Postgres
+    host: Optional[str] = "localhost"
+    port: Optional[int] = 5432
+    user: Optional[str] = "postgres"
+    password: Optional[str] = "postgres"
     optimize_full_load: bool = Field(
         default=True,
         description="Enable dropping/recreating indexes and FKs during a full load.",

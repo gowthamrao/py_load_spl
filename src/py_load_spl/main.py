@@ -8,6 +8,7 @@ from .acquisition import download_all_archives, download_spl_archives
 from .config import Settings
 from .db.base import DatabaseLoader
 from .db.postgres import PostgresLoader
+from .db.sqlite import SqliteLoader
 from .parsing import parse_spl_file
 from .transformation import CsvWriter, FileWriter, ParquetWriter, Transformer
 from .util import unzip_archive
@@ -16,11 +17,16 @@ logger = logging.getLogger(__name__)
 
 
 def get_db_loader(settings: Settings) -> DatabaseLoader:
-    if settings.db.adapter == "postgresql":
+    """Instantiates the correct database loader based on settings."""
+    adapter = settings.db.adapter
+    logger.info(f"Initializing database adapter: {adapter}")
+    if adapter == "postgresql":
         return PostgresLoader(settings.db)
+    elif adapter == "sqlite":
+        return SqliteLoader(settings.db)
     else:
-        logger.error(f"Unsupported DB adapter '{settings.db.adapter}'")
-        raise ValueError(f"Unsupported DB adapter '{settings.db.adapter}'")
+        logger.error(f"Unsupported DB adapter '{adapter}'")
+        raise ValueError(f"Unsupported DB adapter '{adapter}'")
 
 
 def get_file_writer(settings: Settings, output_dir: Path) -> FileWriter:

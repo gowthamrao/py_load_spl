@@ -14,15 +14,20 @@ def test_cli_no_command():
     assert result.exit_code == 0
     assert "No command specified" in result.stdout
 
-def test_cli_unsupported_db_adapter(monkeypatch):
-    """Tests that the CLI exits gracefully with an unsupported DB adapter."""
-    # We must mock get_settings to bypass Pydantic's validation for the test
-    mock_settings = Settings(db={"adapter": "unsupported_db"})
-    monkeypatch.setattr("py_load_spl.cli.get_settings", lambda: mock_settings)
+from pydantic import ValidationError
 
-    result = runner.invoke(app, ["init"])
-    assert result.exit_code == 1
-    assert "Unsupported DB adapter 'unsupported_db'" in result.stdout
+
+def test_cli_unsupported_db_adapter():
+    """
+    Tests that creating Settings with an unsupported DB adapter raises a
+    ValidationError, thanks to Pydantic's Literal validation.
+    """
+    with pytest.raises(ValidationError) as excinfo:
+        Settings(db={"adapter": "unsupported_db"})
+
+    # Check that the error message is informative
+    assert "db.adapter" in str(excinfo.value)
+    assert "Input should be 'postgresql' or 'sqlite'" in str(excinfo.value)
 
 def test_full_load_non_existent_source():
     """Tests the validation for a source path that does not exist."""
