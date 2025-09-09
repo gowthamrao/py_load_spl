@@ -51,9 +51,19 @@ def test_transformer_creates_correct_csvs(tmp_path: Path) -> None:
     transformer = Transformer(output_dir=output_dir)
 
     # 2. Act
-    transformer.transform_stream(parsed_data_stream)
+    stats = transformer.transform_stream(parsed_data_stream)
 
     # 3. Assert
+    # Assert that the stats are correct
+    assert isinstance(stats, dict)
+    assert stats.get("products.csv") == 1
+    assert stats.get("ingredients.csv") == 1
+    assert stats.get("packaging.csv") == 1
+    assert stats.get("marketing_status.csv") == 1
+    assert stats.get("product_ndcs.csv") == 1
+    assert stats.get("spl_raw_documents.csv") == 1
+    assert sum(stats.values()) == 6
+
     # Check that all expected files were created
     products_csv = output_dir / "products.csv"
     ingredients_csv = output_dir / "ingredients.csv"

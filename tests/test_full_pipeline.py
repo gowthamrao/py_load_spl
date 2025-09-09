@@ -6,7 +6,7 @@ import os
 
 from py_load_spl.config import DatabaseSettings
 from py_load_spl.db.postgres import PostgresLoader
-from py_load_spl.parsing import iter_spl_files
+from py_load_spl.parsing import parse_spl_file
 from py_load_spl.transformation import Transformer
 
 SAMPLE_XML_WITH_ROUTE = """<?xml version="1.0" encoding="UTF-8"?>
@@ -111,15 +111,22 @@ def test_full_etl_pipeline_mocked(mock_psycopg2):
 
 
         # 2. Act: Run the E-T-L process
-        parsed_stream = iter_spl_files(source_dir)
+        # Mimic the parallel execution logic from the CLI
+        xml_files = list(source_dir.glob("*.xml"))
+        parsed_stream = map(parse_spl_file, xml_files)
+
         transformer = Transformer(output_dir)
-        transformer.transform_stream(parsed_stream)
+        stats = transformer.transform_stream(parsed_stream)
 
         loader.initialize_schema()
         loader.bulk_load_to_staging(output_dir)
         loader.merge_from_staging(mode="full-load")
 
         # 3. Assert
+        # Assert that the stats are returned correctly
+        assert stats["products.csv"] == 1
+        assert stats["spl_raw_documents.csv"] == 1
+
         # Assert that the CSV was created correctly with the new field
         products_csv = output_dir / "products.csv"
         assert products_csv.exists()
@@ -127,8 +134,8 @@ def test_full_etl_pipeline_mocked(mock_psycopg2):
             content = f.read()
             # The order of columns in the model is: document_id, set_id, version_number,
             # effective_time, product_name, manufacturer_name, dosage_form, route_of_administration
-            assert 'ORAL' in content
-            assert 'd1b64b62-050a-4895-924c-d2862d2a6a69' in content
+            assert "ORAL" in content
+            assert "d1b64b62-050a-4895-924c-d2862d2a6a69" in content
             print("Verified 'ORAL' is present in the output products.csv")
 
         # Assert that the database methods were called

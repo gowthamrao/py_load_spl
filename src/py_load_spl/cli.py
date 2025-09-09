@@ -1,3 +1,4 @@
+import concurrent.futures
 import logging
 import tempfile
 from pathlib import Path
@@ -9,7 +10,7 @@ from . import __name__ as app_name
 from .config import get_settings
 from .db.base import DatabaseLoader
 from .db.postgres import PostgresLoader
-from .parsing import iter_spl_files
+from .parsing import parse_spl_file
 from .transformation import Transformer
 from .util import setup_logging
 
@@ -79,13 +80,24 @@ def full_load(
             output_dir = Path(temp_dir_str)
             console.print(f"Intermediate CSV files will be stored in: {output_dir}")
 
-            console.print("[cyan]Step 1: Parsing and Transforming...[/cyan]")
-            parsed_data_stream = iter_spl_files(source)
-            transformer = Transformer(output_dir=output_dir)
-            transformer.transform_stream(parsed_data_stream)
+            console.print("[cyan]Step 1: Finding XML files...[/cyan]")
+            xml_files = list(source.glob("**/*.xml"))
+            console.print(f"Found {len(xml_files)} XML files to process.")
+
+            console.print(
+                f"[cyan]Step 2: Parsing and Transforming in parallel (max_workers={settings.max_workers})...[/cyan]"
+            )
+            with concurrent.futures.ProcessPoolExecutor(
+                max_workers=settings.max_workers
+            ) as executor:
+                parsed_data_stream = executor.map(parse_spl_file, xml_files)
+                transformer = Transformer(output_dir=output_dir)
+                # The 'stats' variable will be used in the next step of the plan
+                stats = transformer.transform_stream(parsed_data_stream)
+
             console.print("[green]Parsing and Transformation complete.[/green]")
 
-            console.print("[cyan]Step 2: Loading data into database...[/cyan]")
+            console.print("[cyan]Step 3: Loading data into database...[/cyan]")
             loader.pre_load_optimization()
             loader.bulk_load_to_staging(output_dir)
             loader.merge_from_staging("full-load")
@@ -93,7 +105,8 @@ def full_load(
             console.print("[green]Database loading complete.[/green]")
 
         if run_id:
-            loader.end_run(run_id, "SUCCESS", records_loaded=-1) # Placeholder
+            total_records = sum(stats.values()) if stats else 0
+            loader.end_run(run_id, "SUCCESS", total_records)
         console.print("[bold green]Full load process finished successfully.[/bold green]")
     except Exception as e:
         console.print(f"[bold red]An error occurred during the full load process: {e}[/bold red]")
@@ -141,22 +154,31 @@ def delta_load(ctx: typer.Context) -> None:
                 unzip_archive(archive_path, xml_temp_dir)
 
             # Step 3: Transform XMLs to CSVs
-            console.print(f"[cyan]Step 3: Parsing and Transforming XMLs to CSVs in {csv_temp_dir}...[/cyan]")
-            parsed_data_stream = iter_spl_files(xml_temp_dir)
-            transformer = Transformer(output_dir=csv_temp_dir)
-            stats = transformer.transform_stream(parsed_data_stream)
+            console.print(f"[cyan]Step 3: Finding XML files in {xml_temp_dir}...[/cyan]")
+            xml_files = list(xml_temp_dir.glob("**/*.xml"))
+            console.print(f"Found {len(xml_files)} XML files to process.")
+
+            console.print(
+                f"[cyan]Step 4: Parsing and Transforming in parallel (max_workers={settings.max_workers})...[/cyan]"
+            )
+            with concurrent.futures.ProcessPoolExecutor(
+                max_workers=settings.max_workers
+            ) as executor:
+                parsed_data_stream = executor.map(parse_spl_file, xml_files)
+                transformer = Transformer(output_dir=csv_temp_dir)
+                stats = transformer.transform_stream(parsed_data_stream)
             console.print("[green]Parsing and Transformation complete.[/green]")
 
-            # Step 4: Load data into database
-            console.print("[cyan]Step 4: Loading data into database...[/cyan]")
+            # Step 5: Load data into database
+            console.print("[cyan]Step 5: Loading data into database...[/cyan]")
             loader.pre_load_optimization()
             loader.bulk_load_to_staging(csv_temp_dir)
             loader.merge_from_staging("delta-load")
             loader.post_load_cleanup()
             console.print("[green]Database loading complete.[/green]")
 
-            # Step 5: Record processed archives
-            console.print("[cyan]Step 5: Recording processed archives in database...[/cyan]")
+            # Step 6: Record processed archives
+            console.print("[cyan]Step 6: Recording processed archives in database...[/cyan]")
             for archive in downloaded_archives:
                 loader.record_processed_archive(archive.name, archive.checksum)
 
