@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import List
 
 import typer
+from python_json_logger import jsonlogger
 from rich.console import Console
 
 from . import __name__ as app_name
@@ -25,22 +26,47 @@ def main(
     log_level: str = typer.Option(
         "INFO", help="Set the logging level.", envvar="LOG_LEVEL"
     ),
+    log_format: str = typer.Option(
+        "json", help="Set the log format ('json' or 'text').", envvar="LOG_FORMAT"
+    ),
 ) -> None:
     """
     A CLI for the SPL Data Loader.
     """
-    # Setup logging
-    logging.basicConfig(
-        level=log_level.upper(),
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    # F009.1: Setup structured logging
+    logger = logging.getLogger()
+    logger.setLevel(log_level.upper())
+
+    # Remove any existing handlers
+    for handler in logger.handlers[:]:
+        logger.removeHandler(handler)
+
+    handler = logging.StreamHandler()
+
+    if log_format.lower() == "json":
+        # Add a timestamp to the JSON log record
+        formatter = jsonlogger.JsonFormatter(
+            "%(asctime)s %(name)s %(levelname)s %(message)s"
+        )
+    else:
+        formatter = logging.Formatter(
+            "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+        )
+
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+
+    logging.getLogger(__name__).info(
+        f"Logging level set to {log_level}, format set to {log_format}"
     )
-    logging.getLogger(__name__).info(f"Logging level set to {log_level}")
 
     # Load settings and store them in the context for other commands to use
     ctx.obj = get_settings()
 
     if ctx.invoked_subcommand is None:
-        console.print("[bold red]No command specified. Use --help for options.[/bold red]")
+        console.print(
+            "[bold red]No command specified. Use --help for options.[/bold red]"
+        )
 
 
 @app.command()
@@ -55,7 +81,9 @@ def download(ctx: typer.Context) -> None:
     if settings.db.adapter == "postgresql":
         loader: DatabaseLoader = PostgresLoader(settings.db)
     else:
-        console.print(f"[bold red]Error: Unsupported DB adapter '{settings.db.adapter}'[/bold red]")
+        console.print(
+            f"[bold red]Error: Unsupported DB adapter '{settings.db.adapter}'[/bold red]"
+        )
         raise typer.Exit(1)
 
     console.print("[bold green]Starting data acquisition process...[/bold green]")
@@ -65,7 +93,9 @@ def download(ctx: typer.Context) -> None:
             f"[bold green]Data acquisition command finished. Downloaded {len(newly_downloaded)} new archives.[/bold green]"
         )
     except Exception as e:
-        console.print(f"[bold red]An error occurred during data acquisition: {e}[/bold red]")
+        console.print(
+            f"[bold red]An error occurred during data acquisition: {e}[/bold red]"
+        )
         raise typer.Exit(1)
 
 
@@ -80,7 +110,9 @@ def init(ctx: typer.Context) -> None:
     if settings.db.adapter == "postgresql":
         loader: DatabaseLoader = PostgresLoader(settings.db)
     else:
-        console.print(f"[bold red]Error: Unsupported DB adapter '{settings.db.adapter}'[/bold red]")
+        console.print(
+            f"[bold red]Error: Unsupported DB adapter '{settings.db.adapter}'[/bold red]"
+        )
         raise typer.Exit(1)
 
     try:
@@ -117,7 +149,9 @@ def full_load(
     if settings.db.adapter == "postgresql":
         loader: DatabaseLoader = PostgresLoader(settings.db)
     else:
-        console.print(f"[bold red]Error: Unsupported DB adapter '{settings.db.adapter}'[/bold red]")
+        console.print(
+            f"[bold red]Error: Unsupported DB adapter '{settings.db.adapter}'[/bold red]"
+        )
         raise typer.Exit(1)
 
     run_id = None
@@ -149,10 +183,14 @@ def full_load(
             # In a real implementation, we would count records loaded.
             # For now, we'll use a placeholder.
             loader.end_run(run_id, "SUCCESS", records_loaded=0)
-        console.print("[bold green]Full load process finished successfully.[/bold green]")
+        console.print(
+            "[bold green]Full load process finished successfully.[/bold green]"
+        )
 
     except Exception as e:
-        console.print(f"[bold red]An error occurred during the full load process: {e}[/bold red]")
+        console.print(
+            f"[bold red]An error occurred during the full load process: {e}[/bold red]"
+        )
         # If an error occurred, update the run status to FAILED
         if run_id:
             loader.end_run(run_id, "FAILED", error_log=str(e))
@@ -175,14 +213,18 @@ def delta_load(ctx: typer.Context) -> None:
         if settings.db.adapter == "postgresql":
             loader = PostgresLoader(settings.db)
         else:
-            console.print(f"[bold red]Error: Unsupported DB adapter '{settings.db.adapter}'[/bold red]")
+            console.print(
+                f"[bold red]Error: Unsupported DB adapter '{settings.db.adapter}'[/bold red]"
+            )
             raise typer.Exit(1)
 
         # 1. Acquisition: Find and download new archives
         console.print("[cyan]Step 1: Acquiring new archives...[/cyan]")
         newly_downloaded_archives: List[Archive] = download_spl_archives(loader)
         if not newly_downloaded_archives:
-            console.print("[green]No new archives to process. Database is up to date.[/green]")
+            console.print(
+                "[green]No new archives to process. Database is up to date.[/green]"
+            )
             return
 
         run_id = loader.start_run(mode="delta-load")
@@ -214,21 +256,33 @@ def delta_load(ctx: typer.Context) -> None:
                     loader.merge_from_staging(mode="delta-load")
 
                     # 5. Record success for this archive
-                    loader.record_processed_archive(archive["name"], archive["checksum"])
-                    console.print(f"    [green]Successfully processed {archive['name']}[/green]")
+                    loader.record_processed_archive(
+                        archive["name"], archive["checksum"]
+                    )
+                    console.print(
+                        f"    [green]Successfully processed {archive['name']}[/green]"
+                    )
                     total_archives_processed += 1
 
             except Exception as e:
-                console.print(f"    [bold red]Failed to process archive {archive['name']}. Error: {e}[/bold red]")
+                console.print(
+                    f"    [bold red]Failed to process archive {archive['name']}. Error: {e}[/bold red]"
+                )
                 # Continue to the next archive
                 continue
 
         if run_id:
-            loader.end_run(run_id, "SUCCESS", archives_processed=total_archives_processed)
-        console.print("[bold green]Delta load process finished successfully.[/bold green]")
+            loader.end_run(
+                run_id, "SUCCESS", archives_processed=total_archives_processed
+            )
+        console.print(
+            "[bold green]Delta load process finished successfully.[/bold green]"
+        )
 
     except Exception as e:
-        console.print(f"[bold red]An error occurred during the delta load process: {e}[/bold red]")
+        console.print(
+            f"[bold red]An error occurred during the delta load process: {e}[/bold red]"
+        )
         if loader and run_id:
             loader.end_run(run_id, "FAILED", error_log=str(e))
         raise typer.Exit(1)
