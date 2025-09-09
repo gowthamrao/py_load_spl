@@ -4,6 +4,7 @@ from pathlib import Path
 from uuid import UUID, uuid4
 import pyarrow.parquet as pq
 import pytest
+import xmltodict
 from py_load_spl.models import Product, SplRawDocument
 from py_load_spl.transformation import ParquetWriter
 
@@ -37,6 +38,13 @@ def test_parquet_writer_writes_correct_data():
             raw_data="<section><title>Warnings</title><text>May cause drowsiness.</text></section>",
             source_filename="test.zip/test.xml",
         )
+
+        # --- Transform Data ---
+        # Manually transform the raw_spl_doc to JSON, since the test
+        # bypasses the Transformer class.
+        if raw_spl_doc.raw_data:
+            xml_dict = xmltodict.parse(raw_spl_doc.raw_data)
+            raw_spl_doc.raw_data = json.dumps(xml_dict)
 
         # --- Write Data ---
         with writer:

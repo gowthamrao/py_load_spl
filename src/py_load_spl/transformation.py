@@ -1,6 +1,7 @@
 import csv
 import json
 import logging
+import xmltodict
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from collections.abc import Iterable
@@ -96,14 +97,6 @@ class CsvWriter(FileWriter):
         filename = f"{file_base_name}.csv"
         writer = self._csv_writers[filename]
 
-        # If the model is SplRawDocument, convert raw_data from XML to JSON string
-        if isinstance(model_instance, SplRawDocument) and model_instance.raw_data:
-            import xmltodict
-            import json
-            xml_string = model_instance.raw_data
-            json_string = json.dumps(xmltodict.parse(xml_string))
-            model_instance.raw_data = json_string
-
         dumped = model_instance.model_dump()
 
         row = ["\\N" if v is None else v for v in dumped.values()]
@@ -147,14 +140,6 @@ class ParquetWriter(FileWriter):
         if not file_base_name:
             raise TypeError(f"No Parquet mapping for model type: {model_type}")
 
-        # If the model is SplRawDocument, convert raw_data from XML to JSON string
-        if isinstance(model_instance, SplRawDocument) and model_instance.raw_data:
-            import xmltodict
-            import json
-            xml_string = model_instance.raw_data
-            json_string = json.dumps(xmltodict.parse(xml_string))
-            model_instance.raw_data = json_string
-
         dumped = model_instance.model_dump()
 
         self._batches[file_base_name].append(dumped)
@@ -193,9 +178,24 @@ class Transformer:
                     continue
 
                 try:
+                    # Centralize the XML to JSON conversion here
+                    raw_doc_model = SplRawDocument.model_validate(record)
+                    if raw_doc_model.raw_data:
+                        try:
+                            # Parse XML to dict, then dump to JSON string
+                            xml_dict = xmltodict.parse(raw_doc_model.raw_data)
+                            raw_doc_model.raw_data = json.dumps(xml_dict)
+                        except Exception as e:
+                            logger.error(
+                                f"Failed to parse XML and convert to JSON for "
+                                f"doc_id {doc_id}. Error: {e}"
+                            )
+                            # Store as null or an error marker instead of failing
+                            raw_doc_model.raw_data = None
+
                     # Validate and write all model types from the single source record
                     writer.write(Product.model_validate(record))
-                    writer.write(SplRawDocument.model_validate(record))
+                    writer.write(raw_doc_model)  # Write the modified raw_doc_model
 
                     for ing_data in record.get("ingredients", []):
                         writer.write(Ingredient(document_id=doc_id, **ing_data))
