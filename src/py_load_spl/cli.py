@@ -107,7 +107,7 @@ def _quarantine_and_parse_in_parallel(
             quarantine_dir.mkdir(parents=True, exist_ok=True)
             target_path = quarantine_dir / source_file_path.name
             if source_file_path.exists():
-                shutil.move(str(source_file_path), str(target_path))
+                source_file_path.rename(target_path)
                 quarantined_count += 1
                 logging.warning(
                     "Moved corrupted file %s to %s due to parsing error: %s",

@@ -1,172 +1,157 @@
+import hashlib
 import pytest
 import requests
-import requests_mock
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 
-from py_load_spl.acquisition import get_archive_list
+from py_load_spl.acquisition import (
+    download_archive,
+    get_archive_list,
+    download_spl_archives,
+    download_all_archives,
+)
 from py_load_spl.config import Settings
 from py_load_spl.models import Archive
 
-# A simplified HTML fixture mimicking the structure of the DailyMed page
-HTML_FIXTURE = """
+# This is a sample of the HTML structure from the real download page.
+SAMPLE_HTML_VALID = f"""
 <html>
 <body>
+  <div class="results-box">
     <ul class="download">
-        <li>
-            dm_spl_monthly_update_aug2025.zip [ <a href="https://dailymed-data.nlm.nih.gov/public-release-files/dm_spl_monthly_update_aug2025.zip">HTTPS</a> / <a href="ftp://...">FTP</a> ]
-            <ul>
-                <li>Number of labels: 3,938</li>
-                <li>File size: 1.43GB</li>
-                <li>MD5 checksum: 05a5c3356b3fa31025294a81ecf8be8f</li>
-            </ul>
-        </li>
-        <li>
-            dm_spl_monthly_update_jul2025.zip [ <a href="https://dailymed-data.nlm.nih.gov/public-release-files/dm_spl_monthly_update_jul2025.zip">HTTPS</a> / <a href="ftp://...">FTP</a> ]
-            <ul>
-                <li>Number of labels: 4,379</li>
-                <li>File size: 1.56GB</li>
-                <li>MD5 checksum: 4a41fe24866f72486c365e95cec550db</li>
-            </ul>
-        </li>
-        <!-- An item without a checksum to ensure it's skipped -->
-        <li>
-            dm_spl_monthly_update_jun2025.zip [ <a href="https://dailymed-data.nlm.nih.gov/public-release-files/dm_spl_monthly_update_jun2025.zip">HTTPS</a> / <a href="ftp://...">FTP</a> ]
-            <ul>
-                <li>File size: 1.67GB</li>
-            </ul>
-        </li>
+      <li>
+        <a href="https://example.com/part1.zip">Part 1 (spls) - HTTPS</a>
+        <br />MD5 checksum: 11111111111111111111111111111111
+      </li>
+      <li>
+        <a href="https://example.com/part2.zip">Part 2 (spls) - HTTPS</a>
+        <br />MD5 checksum: {hashlib.md5(b"data").hexdigest()}
+      </li>
     </ul>
+  </div>
 </body>
 </html>
 """
 
+SAMPLE_HTML_MALFORMED = """
+<html>
+<body>
+  <ul class="download">
+      <li>Item without a link.</li>
+      <li><a href="/wrong-path">A link that is not a zip file</a></li>
+      <li><a href="https://example.com/no_checksum.zip">HTTPS</a><br />No checksum here</li>
+  </ul>
+</body>
+</html>
+"""
 
-def test_get_archive_list_success():
-    """
-    Tests that get_archive_list successfully scrapes and parses the archive page.
-    """
-    settings = Settings()
-    with requests_mock.Mocker() as m:
-        m.get(str(settings.fda_source_url), text=HTML_FIXTURE)
-        archives = get_archive_list(settings)
+@pytest.fixture
+def mock_settings(tmp_path: Path) -> Settings:
+    """Provides a Settings instance with a temporary download path."""
+    return Settings(download_path=str(tmp_path))
 
+def test_get_archive_list(mock_settings: Settings, requests_mock):
+    """Tests that the archive list is scraped correctly from the HTML."""
+    requests_mock.get(str(mock_settings.fda_source_url), text=SAMPLE_HTML_VALID)
+    archives = get_archive_list(mock_settings)
     assert len(archives) == 2
+    assert archives[0].name == "part1.zip"
+    assert archives[0].checksum == "11111111111111111111111111111111"
+    assert archives[1].url == "https://example.com/part2.zip"
 
-    expected_archives = [
-        Archive(
-            name="dm_spl_monthly_update_aug2025.zip",
-            url="https://dailymed-data.nlm.nih.gov/public-release-files/dm_spl_monthly_update_aug2025.zip",
-            checksum="05a5c3356b3fa31025294a81ecf8be8f",
-        ),
-        Archive(
-            name="dm_spl_monthly_update_jul2025.zip",
-            url="https://dailymed-data.nlm.nih.gov/public-release-files/dm_spl_monthly_update_jul2025.zip",
-            checksum="4a41fe24866f72486c365e95cec550db",
-        ),
-    ]
-
-    # Sort lists of Pydantic models to ensure comparison is order-independent
-    assert sorted(archives, key=lambda x: x.name) == sorted(
-        expected_archives, key=lambda x: x.name
+def test_get_archive_list_request_error(mock_settings: Settings, requests_mock):
+    """Tests that a network error during list fetch is handled."""
+    requests_mock.get(
+        str(mock_settings.fda_source_url), exc=requests.RequestException("Network Error")
     )
+    with pytest.raises(requests.RequestException):
+        get_archive_list(mock_settings)
 
+def test_get_archive_list_malformed_page(mock_settings: Settings, requests_mock):
+    """Tests that the scraper handles malformed or unexpected HTML gracefully."""
+    requests_mock.get(str(mock_settings.fda_source_url), text=SAMPLE_HTML_MALFORMED)
+    archives = get_archive_list(mock_settings)
+    assert len(archives) == 0
 
-def test_get_archive_list_http_error():
-    """
-    Tests that get_archive_list raises an exception on HTTP error.
-    """
-    settings = Settings()
-    with requests_mock.Mocker() as m:
-        m.get(str(settings.fda_source_url), status_code=500)
+def test_get_archive_list_no_archives_found(mock_settings: Settings, requests_mock):
+    """Tests the case where the page is valid but contains no archives."""
+    requests_mock.get(str(mock_settings.fda_source_url), text="<html></html>")
+    archives = get_archive_list(mock_settings)
+    assert len(archives) == 0
 
-        with pytest.raises(requests.exceptions.HTTPError):
-            get_archive_list(settings)
-
-
-def test_get_archive_list_no_archives_found():
-    """
-    Tests that get_archive_list returns an empty list when no archives are found.
-    """
-    settings = Settings()
-    with requests_mock.Mocker() as m:
-        m.get(
-            str(settings.fda_source_url), text="<html><body>No links here</body></html>"
-        )
-
-        archives = get_archive_list(settings)
-        assert len(archives) == 0
-
-
-import hashlib
-from pathlib import Path
-
-from py_load_spl.acquisition import download_archive
-
-
-def test_download_archive_success(tmp_path: Path):
-    """
-    Tests successful download and checksum verification.
-    """
-    mock_content = b"This is some mock zip file content."
-    mock_checksum = hashlib.md5(mock_content).hexdigest()
+def test_download_archive_success(mock_settings: Settings, requests_mock):
+    """Tests a successful download and checksum verification."""
+    content = b"hello"
     archive = Archive(
-        name="test_archive.zip",
-        url="https://example.com/test_archive.zip",
-        checksum=mock_checksum,
+        name="test.zip",
+        url="https://example.com/test.zip",
+        checksum=hashlib.md5(content).hexdigest(),
     )
-    # Use a temporary path for downloads
-    settings = Settings(download_path=str(tmp_path))
+    requests_mock.get("https://example.com/test.zip", content=content, headers={"Content-Length": str(len(content))})
+    file_path = download_archive(archive, mock_settings)
+    assert file_path.exists()
+    assert file_path.read_bytes() == content
 
-    with requests_mock.Mocker() as m:
-        m.get(
-            archive.url,
-            content=mock_content,
-            headers={"Content-Length": str(len(mock_content))},
-        )
-        result_path = download_archive(archive, settings)
-
-    expected_path = tmp_path / archive.name
-    assert result_path == expected_path
-    assert expected_path.exists()
-    assert expected_path.read_bytes() == mock_content
-
-
-def test_download_archive_checksum_mismatch(tmp_path: Path):
-    """
-    Tests that a checksum mismatch raises an error and cleans up the file.
-    """
-    mock_content = b"some data"
-    wrong_checksum = "thisisnottherightchecksum"
+def test_download_archive_checksum_mismatch(mock_settings: Settings, requests_mock):
+    """Tests that a checksum mismatch raises a ValueError and cleans up the file."""
     archive = Archive(
-        name="bad_checksum.zip",
-        url="https://example.com/bad_checksum.zip",
-        checksum=wrong_checksum,
+        name="test.zip",
+        url="https://example.com/test.zip",
+        checksum="11111111111111111111111111111111",  # Incorrect checksum
     )
-    settings = Settings(download_path=str(tmp_path))
-    file_path = tmp_path / archive.name
-
-    with requests_mock.Mocker() as m:
-        m.get(archive.url, content=mock_content)
-        with pytest.raises(ValueError, match="Checksum mismatch"):
-            download_archive(archive, settings)
-
+    requests_mock.get("https://example.com/test.zip", content=b"world")
+    file_path = Path(mock_settings.download_path) / archive.name
+    with pytest.raises(ValueError, match="Checksum mismatch"):
+        download_archive(archive, mock_settings)
     assert not file_path.exists()
 
-
-def test_download_archive_request_error(tmp_path: Path):
-    """
-    Tests that a request error during download is handled and the file is cleaned up.
-    """
+def test_download_archive_network_error(mock_settings: Settings, requests_mock):
+    """Tests that a network error during download is handled and the file is cleaned up."""
     archive = Archive(
-        name="error.zip",
-        url="https://example.com/error.zip",
-        checksum="dummychecksum",
+        name="test.zip",
+        url="https://example.com/test.zip",
+        checksum="whatever",
     )
-    settings = Settings(download_path=str(tmp_path))
-    file_path = tmp_path / archive.name
-
-    with requests_mock.Mocker() as m:
-        m.get(archive.url, status_code=404)
-        with pytest.raises(requests.exceptions.HTTPError):
-            download_archive(archive, settings)
-
+    requests_mock.get(
+        "https://example.com/test.zip", exc=requests.RequestException("Connection timed out")
+    )
+    file_path = Path(mock_settings.download_path) / archive.name
+    with pytest.raises(requests.RequestException):
+        download_archive(archive, mock_settings)
     assert not file_path.exists()
+
+def test_download_spl_archives_db_error(mock_settings: Settings):
+    """Tests that the process aborts gracefully if the DB is down."""
+    mock_loader = MagicMock()
+    mock_loader.get_processed_archives.side_effect = Exception("DB is offline")
+    result = download_spl_archives(mock_loader)
+    assert result == []
+
+def test_download_spl_archives_no_archives_at_source(mock_settings: Settings, requests_mock):
+    """Tests when the scraper finds no archives."""
+    mock_loader = MagicMock()
+    mock_loader.get_processed_archives.return_value = set()
+    requests_mock.get(str(mock_settings.fda_source_url), text="<html></html>")
+    result = download_spl_archives(mock_loader)
+    assert result == []
+
+def test_download_all_archives_single_failure(mock_settings: Settings, requests_mock):
+    """Tests that one failed download doesn't stop the whole process."""
+    requests_mock.get(str(mock_settings.fda_source_url), text=SAMPLE_HTML_VALID)
+    # Make the first archive download fail
+    requests_mock.get("https://example.com/part1.zip", exc=requests.RequestException("Download failed"))
+    # Make the second one succeed
+    requests_mock.get("https://example.com/part2.zip", content=b"data", headers={"Content-Length": "4"})
+
+    downloaded = download_all_archives(mock_settings)
+    assert len(downloaded) == 1
+    assert downloaded[0].name == "part2.zip"
+
+def test_download_all_archives_no_settings(requests_mock):
+    """Tests that get_settings() is called if no settings are provided."""
+    with patch("py_load_spl.acquisition.get_settings") as mock_get_settings:
+        mock_settings_instance = Settings()
+        mock_get_settings.return_value = mock_settings_instance
+        requests_mock.get(str(mock_settings_instance.fda_source_url), text="<html></html>")
+        download_all_archives()
+        mock_get_settings.assert_called_once()
