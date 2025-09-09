@@ -2,7 +2,7 @@ import hashlib
 import logging
 import re
 from pathlib import Path
-from typing import List, TypedDict
+from typing import List
 
 import requests
 from bs4 import BeautifulSoup
@@ -17,16 +17,9 @@ from rich.progress import (
 
 from .config import Settings, get_settings
 from .db.base import DatabaseLoader
+from .models import Archive
 
 logger = logging.getLogger(__name__)
-
-
-class Archive(TypedDict):
-    """Represents a downloadable SPL archive file."""
-
-    name: str
-    url: str
-    checksum: str
 
 
 def get_archive_list(settings: Settings) -> List[Archive]:
@@ -59,11 +52,11 @@ def get_archive_list(settings: Settings) -> List[Archive]:
         checksum_match = re.search(r"MD5 checksum:\s*([0-9a-fA-F]{32})", li.get_text())
         if checksum_match:
             archives.append(
-                {
-                    "name": href.split("/")[-1],
-                    "url": href,
-                    "checksum": checksum_match.group(1).strip(),
-                }
+                Archive(
+                    name=href.split("/")[-1],
+                    url=href,
+                    checksum=checksum_match.group(1).strip(),
+                )
             )
 
     if not archives:
@@ -79,9 +72,9 @@ def download_archive(archive: Archive, settings: Settings) -> Path:
     """
     download_dir = Path(settings.download_path)
     download_dir.mkdir(parents=True, exist_ok=True)
-    file_path = download_dir / archive["name"]
+    file_path = download_dir / archive.name
 
-    logger.info("Downloading %s to %s", archive["url"], file_path)
+    logger.info("Downloading %s to %s", archive.url, file_path)
 
     progress = Progress(
         TextColumn("[bold blue]{task.fields[filename]}", justify="right"),
@@ -97,10 +90,10 @@ def download_archive(archive: Archive, settings: Settings) -> Path:
 
     md5 = hashlib.md5()
     try:
-        with requests.get(archive["url"], stream=True, timeout=300) as r:
+        with requests.get(archive.url, stream=True, timeout=300) as r:
             r.raise_for_status()
             total_size = int(r.headers.get("content-length", 0))
-            task_id = progress.add_task("download", total=total_size, filename=archive["name"])
+            task_id = progress.add_task("download", total=total_size, filename=archive.name)
             with open(file_path, "wb") as f, progress:
                 for chunk in r.iter_content(chunk_size=8192):
                     f.write(chunk)
@@ -108,16 +101,16 @@ def download_archive(archive: Archive, settings: Settings) -> Path:
                     progress.update(task_id, advance=len(chunk))
 
         calculated_checksum = md5.hexdigest()
-        if calculated_checksum.lower() != archive["checksum"].lower():
+        if calculated_checksum.lower() != archive.checksum.lower():
             file_path.unlink()  # Delete corrupted file
             raise ValueError(
-                f"Checksum mismatch for {archive['name']}. "
-                f"Expected {archive['checksum']}, got {calculated_checksum}."
+                f"Checksum mismatch for {archive.name}. "
+                f"Expected {archive.checksum}, got {calculated_checksum}."
             )
-        logger.info("Checksum verified for %s", archive["name"])
+        logger.info("Checksum verified for %s", archive.name)
         return file_path
     except (requests.RequestException, ValueError) as e:
-        logger.error("Failed to download or verify %s: %s", archive["name"], e)
+        logger.error("Failed to download or verify %s: %s", archive.name, e)
         # Clean up partial download if it exists
         if file_path.exists():
             file_path.unlink(missing_ok=True)
@@ -156,7 +149,7 @@ def download_spl_archives(loader: DatabaseLoader) -> List[Archive]:
         return []
 
     # Determine which archives are new
-    all_available_archives_map = {a["name"]: a for a in all_available_archives}
+    all_available_archives_map = {a.name: a for a in all_available_archives}
     new_archive_names = set(all_available_archives_map.keys()) - processed_archives_names
 
     if not new_archive_names:
