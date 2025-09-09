@@ -46,8 +46,8 @@ def test_init_db_failure(monkeypatch):
 def test_full_load_no_xml_files_found(tmp_path, monkeypatch):
     """Tests that a full load on an empty directory aborts gracefully."""
     # Mock the loader to avoid DB connection
-    monkeypatch.setattr("py_load_spl.cli.get_db_loader", lambda s: MagicMock())
-    result = runner.invoke(app, ["full-load", "--source", str(tmp_path)])
+    monkeypatch.setattr("py_load_spl.main.get_db_loader", lambda s: MagicMock())
+    result = runner.invoke(app, ["--log-format", "text", "full-load", "--source", str(tmp_path)])
     assert result.exit_code == 0
     assert "No XML files found in the source. Aborting." in result.stdout
 
@@ -65,7 +65,7 @@ def test_run_full_load_catches_exception(tmp_path, monkeypatch):
     # Mock the loader to fail during the merge step
     mock_loader_instance = MagicMock()
     mock_loader_instance.merge_from_staging.side_effect = Exception("Merge Failed!")
-    monkeypatch.setattr("py_load_spl.cli.get_db_loader", lambda s: mock_loader_instance)
+    monkeypatch.setattr("py_load_spl.main.get_db_loader", lambda s: mock_loader_instance)
 
     result = runner.invoke(app, ["full-load", "--source", str(source_dir)])
     assert result.exit_code == 1
