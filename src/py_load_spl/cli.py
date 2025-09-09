@@ -102,10 +102,77 @@ def full_load(
         raise typer.Exit(1)
 
 
+from .acquisition import download_spl_archives
+from .util import unzip_archive
+
+
 @app.command()
 def delta_load(ctx: typer.Context) -> None:
-    """F008.3: Perform an incremental (delta) load. (Not Implemented)"""
-    console.print("[bold yellow]Delta load is not yet implemented.[/bold yellow]")
+    """F008.3: Perform an incremental (delta) load from the FDA source."""
+    settings = ctx.obj
+    console.print("[bold cyan]Starting delta data load from FDA source...[/bold cyan]")
+    loader = get_db_loader(settings)
+    run_id = None
+    downloaded_archives = []
+    try:
+        run_id = loader.start_run(mode="delta-load")
+
+        # Step 1: Download new archives
+        console.print("[cyan]Step 1: Checking for and downloading new archives...[/cyan]")
+        downloaded_archives = download_spl_archives(loader)
+        if not downloaded_archives:
+            console.print("[green]No new archives found. Database is up-to-date.[/green]")
+            loader.end_run(run_id, "SUCCESS", 0)
+            return
+
+        console.print(f"[green]Downloaded {len(downloaded_archives)} new archive(s).[/green]")
+
+        # Create temporary directories for processing
+        with tempfile.TemporaryDirectory() as xml_temp_dir_str, \
+             tempfile.TemporaryDirectory() as csv_temp_dir_str:
+
+            xml_temp_dir = Path(xml_temp_dir_str)
+            csv_temp_dir = Path(csv_temp_dir_str)
+
+            # Step 2: Unzip all archives
+            console.print(f"[cyan]Step 2: Extracting XML files to {xml_temp_dir}...[/cyan]")
+            for archive in downloaded_archives:
+                archive_path = Path(settings.download_path) / archive.name
+                unzip_archive(archive_path, xml_temp_dir)
+
+            # Step 3: Transform XMLs to CSVs
+            console.print(f"[cyan]Step 3: Parsing and Transforming XMLs to CSVs in {csv_temp_dir}...[/cyan]")
+            parsed_data_stream = iter_spl_files(xml_temp_dir)
+            transformer = Transformer(output_dir=csv_temp_dir)
+            stats = transformer.transform_stream(parsed_data_stream)
+            console.print("[green]Parsing and Transformation complete.[/green]")
+
+            # Step 4: Load data into database
+            console.print("[cyan]Step 4: Loading data into database...[/cyan]")
+            loader.pre_load_optimization()
+            loader.bulk_load_to_staging(csv_temp_dir)
+            loader.merge_from_staging("delta-load")
+            loader.post_load_cleanup()
+            console.print("[green]Database loading complete.[/green]")
+
+            # Step 5: Record processed archives
+            console.print("[cyan]Step 5: Recording processed archives in database...[/cyan]")
+            for archive in downloaded_archives:
+                loader.record_processed_archive(archive.name, archive.checksum)
+
+        if run_id:
+            # Use the stats from the transformer for a more accurate count
+            total_records = sum(stats.values()) if stats else 0
+            loader.end_run(run_id, "SUCCESS", total_records)
+        console.print("[bold green]Delta load process finished successfully.[/bold green]")
+
+    except Exception as e:
+        console.print(f"[bold red]An error occurred during the delta load process: {e}[/bold red]")
+        # Also log the traceback for debugging
+        logging.getLogger(__name__).exception("Delta load failed")
+        if run_id:
+            loader.end_run(run_id, "FAILED", 0, str(e))
+        raise typer.Exit(1)
 
 
 if __name__ == "__main__":

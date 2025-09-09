@@ -28,6 +28,14 @@ class Product(BaseModel):
         return v
 
 
+class Archive(BaseModel):
+    """Data model for a downloadable SPL archive file."""
+
+    name: str
+    url: str
+    checksum: str
+
+
 class ProductNdc(BaseModel):
     """Data model for the 'product_ndcs' table."""
 
