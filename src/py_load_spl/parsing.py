@@ -81,9 +81,11 @@ def parse_spl_file(file_path: Path) -> dict[str, Any]:
                 data["route_of_administration"] = route_code_el.get("displayName") if route_code_el is not None else None
 
                 # Extract Product NDCs
-                for code_el in _xpa(product_element, ".//hl7:asEquivalentEntity/hl7:code[@codeSystem='2.16.840.1.113883.6.69']"):
-                    if ndc_code := code_el.get("code"):
-                        data["product_ndcs"].append({"ndc_code": ndc_code})
+                as_equivalent_entity_el = _xp(product_element, "./hl7:asEquivalentEntity")
+                if as_equivalent_entity_el is not None:
+                    for code_el in _xpa(as_equivalent_entity_el, "./hl7:code[@codeSystem='2.16.840.1.113883.6.69']"):
+                        if ndc_code := code_el.get("code"):
+                            data["product_ndcs"].append({"ndc_code": ndc_code})
 
                 # Extract ingredients (F003.2)
                 for ingredient_el in _xpa(product_element, ".//hl7:ingredient"):
@@ -111,22 +113,23 @@ def parse_spl_file(file_path: Path) -> dict[str, Any]:
         if body is not None:
             # Packaging (F003.2)
             for section in _xpa(body, ".//hl7:section"):
-                code_el = _xp(section, "hl7:code")
+                code_el = _xp(section, ".//hl7:code")
                 if code_el is not None and code_el.get("code") in ('34069-5', '51945-4'):
-                    for part_el in section.iterdescendants(f"{{{NAMESPACES['hl7']}}}part"):
-                        part_code_el = _xp(part_el, ".//hl7:code")
-                    package_ndc = part_code_el.get("code") if part_code_el is not None else None
-                    if package_ndc:
-                        desc_el = _xp(part_el, ".//hl7:desc") or _xp(part_el, ".//hl7:name")
-                        form_code_el = _xp(part_el, ".//hl7:formCode")
-                        data["packaging"].append({
-                            "package_ndc": package_ndc,
-                            "package_description": desc_el.text if desc_el is not None else None,
-                            "package_type": form_code_el.get("displayName") if form_code_el is not None else None,
-                        })
+                    for part_el in _xpa(section, ".//hl7:part"):
+                        part_code_el = _xp(part_el, "./hl7:code")
+                        if part_code_el is not None:
+                            desc_el = _xp(part_el, "./hl7:name")
+                            if desc_el is None:
+                                desc_el = _xp(part_el, "./hl7:desc")
+                            form_code_el = _xp(part_el, "./hl7:formCode")
+                            data["packaging"].append({
+                                "package_ndc": part_code_el.get("code"),
+                                "package_description": desc_el.text if desc_el is not None else None,
+                                "package_type": form_code_el.get("displayName") if form_code_el is not None else None,
+                            })
 
             # Marketing Status
-            for act in _xpa(body, ".//hl7:subject/hl7:marketingAct"):
+            for act in _xpa(body, ".//hl7:subject//hl7:marketingAct"):
                 status_code_el = _xp(act, "./hl7:statusCode")
                 effective_time_el = _xp(act, "./hl7:effectiveTime")
                 start_date_el = _xp(effective_time_el, "./hl7:low") if effective_time_el is not None else None

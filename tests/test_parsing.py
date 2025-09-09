@@ -106,6 +106,13 @@ def test_parse_spl_file(sample_spl_file: Path):
     assert len(data["packaging"]) == 1
     package = data["packaging"][0]
     assert package["package_ndc"] == "12345-678-90"
+    assert package["package_description"] == "30 Tablets in 1 Bottle"
+    assert package["package_type"] == "BOTTLE"
+
+    # Assert product NDCs
+    assert len(data["product_ndcs"]) == 1
+    ndc = data["product_ndcs"][0]
+    assert ndc["ndc_code"] == "12345-678"
 
     # Assert marketing status
     assert len(data["marketing_status"]) == 1

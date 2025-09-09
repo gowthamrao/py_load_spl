@@ -218,6 +218,11 @@ def test_merge_from_staging_delta_load(postgres_loader: PostgresLoader):
         ingredients = [row[0] for row in cur.fetchall()]
         assert ingredients == ["Updated Ingredient"]
 
+        # Check that the child records for the untouched product are still there
+        cur.execute("SELECT count(*) FROM ingredients WHERE document_id = %s", (str(untouched_doc_id),))
+        assert cur.fetchone()[0] == 1
+
+
         # Check that staging tables are empty
         cur.execute("SELECT count(*) FROM products_staging")
         assert cur.fetchone()[0] == 0
