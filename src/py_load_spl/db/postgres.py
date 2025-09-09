@@ -1,9 +1,13 @@
+import io
 import logging
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Literal
 
+import pyarrow as pa
+import pyarrow.csv as pa_csv
+import pyarrow.parquet as pq
 import psycopg2
 from psycopg2.extensions import connection
 
@@ -112,50 +116,60 @@ class PostgresLoader(DatabaseLoader):
             raise
 
     def bulk_load_to_staging(self, intermediate_dir: Path) -> None:
-        """Loads data from CSV files into staging tables using COPY."""
+        """
+        Loads data from intermediate files (CSV or Parquet) into staging tables.
+        Parquet files are converted to a CSV representation in-memory before loading.
+        """
         logger.info(f"Bulk loading data from {intermediate_dir} into staging tables...")
-        # Map CSV filenames to their target staging tables
-        file_to_table_map = {
-            "products.csv": "products_staging",
-            "ingredients.csv": "ingredients_staging",
-            "packaging.csv": "packaging_staging",
-            "marketing_status.csv": "marketing_status_staging",
-            "product_ndcs.csv": "product_ndcs_staging",
-            "spl_raw_documents.csv": "spl_raw_documents_staging",
+        files_to_process = list(intermediate_dir.glob("*.csv")) + list(
+            intermediate_dir.glob("*.parquet")
+        )
+
+        if not files_to_process:
+            logger.warning(f"No intermediate files found in {intermediate_dir}.")
+            return
+
+        # Define the columns for tables where we are not providing the surrogate key.
+        # The order must match the Pydantic model field order.
+        table_columns = {
+            "ingredients_staging": "(document_id, ingredient_name, substance_code, strength_numerator, strength_denominator, unit_of_measure, is_active_ingredient)",
+            "packaging_staging": "(document_id, package_ndc, package_description, package_type)",
+            "marketing_status_staging": "(document_id, marketing_category, start_date, end_date)",
+            "product_ndcs_staging": "(document_id, ndc_code)",
         }
 
         try:
             with self._get_conn() as conn:
                 with conn.cursor() as cur:
-                    for filename, table_name in file_to_table_map.items():
-                        filepath = intermediate_dir / filename
-                        if not filepath.exists():
-                            logger.warning(
-                                f"Intermediate file {filepath} not found. Skipping."
-                            )
-                            continue
-
-                        logger.info(f"Loading {filename} into {table_name}...")
-                        # Define the columns for tables where we are not providing the surrogate key
-                        # The order must match the Pydantic model field order.
-                        table_columns = {
-                            "ingredients_staging": "(document_id, ingredient_name, substance_code, strength_numerator, strength_denominator, unit_of_measure, is_active_ingredient)",
-                            "packaging_staging": "(document_id, package_ndc, package_description, package_type)",
-                            "marketing_status_staging": "(document_id, marketing_category, start_date, end_date)",
-                            "product_ndcs_staging": "(document_id, ndc_code)",
-                        }
+                    for filepath in files_to_process:
+                        table_name = f"{filepath.stem}_staging"
                         column_spec = table_columns.get(table_name, "")
+                        logger.info(f"Loading {filepath.name} into {table_name}...")
 
-                        # F007.1: Use copy_expert for efficient bulk loading
-                        sql = f"""
-                            COPY {table_name} {column_spec} FROM STDIN
-                            WITH (FORMAT CSV, NULL '\\N', QUOTE '\"');
-                        """
-                        with open(filepath, encoding="utf-8") as f:
-                            cur.copy_expert(sql, f)
+                        if filepath.suffix == ".csv":
+                            # Original logic for CSV (no header)
+                            sql = f"""
+                                COPY {table_name} {column_spec} FROM STDIN
+                                WITH (FORMAT CSV, NULL '\\N', QUOTE '\"');
+                            """
+                            with open(filepath, "r", encoding="utf-8") as f:
+                                cur.copy_expert(sql, f)
+
+                        elif filepath.suffix == ".parquet":
+                            # Convert Parquet to in-memory CSV with header
+                            sql = f"""
+                                COPY {table_name} {column_spec} FROM STDIN
+                                WITH (FORMAT CSV, NULL '\\N', QUOTE '\"', HEADER TRUE);
+                            """
+                            table = pq.read_table(filepath)
+                            buffer = io.StringIO()
+                            pa_csv.write_csv(table, buffer)
+                            buffer.seek(0)  # Reset buffer to the beginning
+                            cur.copy_expert(sql, buffer)
+
                 conn.commit()
             logger.info("Bulk load to staging tables complete.")
-        except (OSError, psycopg2.Error) as e:
+        except (OSError, psycopg2.Error, pa.ArrowException) as e:
             logger.error(f"Bulk load to staging failed: {e}")
             if self.conn:
                 self.conn.rollback()

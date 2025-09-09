@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS spl_raw_documents (
     set_id UUID,
     version_number INT,
     effective_time DATE,
-    raw_data JSONB,
+    raw_data TEXT,
     source_filename TEXT,
     loaded_at TIMESTAMPTZ DEFAULT now()
 );
@@ -41,7 +41,7 @@ CREATE TABLE IF NOT EXISTS spl_raw_documents_staging (
     set_id UUID,
     version_number INT,
     effective_time DATE,
-    raw_data JSONB,
+    raw_data TEXT,
     source_filename TEXT,
     loaded_at TIMESTAMPTZ DEFAULT now()
 );
