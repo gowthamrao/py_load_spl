@@ -34,6 +34,11 @@ class Settings(BaseSettings):
     # The FRD requires a configurable download source (F001.1)
     fda_source_url: HttpUrl = "https://dailymed.nlm.nih.gov/dailymed/spl-resources-all-drug-labels.cfm"  # type: ignore
     download_path: str = "data/downloads"
+    quarantine_path: str = Field(
+        default="data/quarantine",
+        description="Directory to move corrupted or unparseable XML files.",
+        env="QUARANTINE_PATH",
+    )
     max_workers: int | None = Field(
         default_factory=os.cpu_count,
         description="Number of parallel processes for parsing. Defaults to number of CPUs.",

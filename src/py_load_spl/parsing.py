@@ -7,6 +7,15 @@ from lxml import etree
 
 logger = logging.getLogger(__name__)
 
+
+class SplParsingError(Exception):
+    """Custom exception for errors during SPL file parsing."""
+
+    def __init__(self, message: str, file_path: Path):
+        self.file_path = file_path
+        super().__init__(f"{message} [file: {file_path}]")
+
+
 # Define the XML namespace for HL7 v3, crucial for XPath queries.
 NAMESPACES = {"hl7": "urn:hl7-org:v3"}
 
@@ -130,6 +139,9 @@ def parse_spl_file(file_path: Path) -> dict[str, Any]:
 
     except (AttributeError, TypeError, ValueError) as e:
         logger.error(f"Error parsing file {file_path}. Some elements may be missing. Error: {e}")
+        raise SplParsingError(
+            f"A critical error occurred during parsing: {e}", file_path=file_path
+        ) from e
 
     # Free up memory
     root.clear()
