@@ -139,20 +139,3 @@ def parse_spl_file(file_path: Path) -> dict[str, Any]:
     return data
 
 
-def iter_spl_files(source_dir: Path) -> Generator[dict[str, Any], None, None]:
-    """
-    Finds all XML files in a directory, parses them, and yields the structured data.
-    """
-    logger.info(f"Searching for SPL XML files in {source_dir}...")
-    xml_files = list(source_dir.glob("**/*.xml"))
-    if not xml_files:
-        logger.warning(f"No XML files found in {source_dir}")
-        return
-
-    for xml_file in xml_files:
-        try:
-            yield parse_spl_file(xml_file)
-        except Exception as e:
-            logger.error(f"Failed to parse {xml_file}, skipping. Error: {e}")
-            pass
-    logger.info(f"Finished processing {len(xml_files)} SPL files.")

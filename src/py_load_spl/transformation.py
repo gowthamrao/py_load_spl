@@ -1,5 +1,6 @@
 import csv
 import logging
+from collections import defaultdict
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any, IO
@@ -59,8 +60,11 @@ class CsvWriterManager:
             handle.close()
         logger.info("All CSV output files closed.")
 
-    def write_row(self, model_instance: BaseModel) -> None:
-        """Writes a Pydantic model instance to the corresponding CSV file."""
+    def write_row(self, model_instance: BaseModel) -> str:
+        """
+        Writes a Pydantic model instance to the corresponding CSV file.
+        Returns the name of the file written to for stats tracking.
+        """
         import json
         from .models import SplRawDocument
 
@@ -79,6 +83,7 @@ class CsvWriterManager:
         # Convert Pydantic model to a list of values, replacing None with \N for Postgres COPY
         row = ["\\N" if v is None else v for v in dumped.values()]
         writer.writerow(row)
+        return filename
 
 
 class Transformer:
@@ -93,18 +98,23 @@ class Transformer:
         self.output_dir = output_dir
         logger.info(f"Transformer initialized. Output will be written to {output_dir}")
 
-    def transform_stream(self, parsed_data_stream: Iterable[dict[str, Any]]) -> None:
+    def transform_stream(
+        self, parsed_data_stream: Iterable[dict[str, Any]]
+    ) -> dict[str, int]:
         """
-        Processes a stream of parsed data and writes it to CSV files.
+        Processes a stream of parsed data, writes it to CSV files, and returns statistics.
 
         Args:
             parsed_data_stream: An iterable of dictionaries, where each dictionary
                                 represents one parsed SPL document.
+
+        Returns:
+            A dictionary with counts of each record type processed.
         """
         logger.info("Starting data transformation stream processing...")
-        record_count = 0
+        stats: dict[str, int] = defaultdict(int)
         with CsvWriterManager(self.output_dir) as writer_manager:
-            for record in parsed_data_stream:
+            for i, record in enumerate(parsed_data_stream):
                 doc_id = record.get("document_id")
                 if not doc_id:
                     logger.warning(f"Skipping record due to missing document_id: {record}")
@@ -113,39 +123,42 @@ class Transformer:
                 try:
                     # 1. Transform and write the main Product record
                     product = Product.model_validate(record)
-                    writer_manager.write_row(product)
+                    stats[writer_manager.write_row(product)] += 1
 
                     # 2. Transform and write the SplRawDocument record
                     raw_doc = SplRawDocument.model_validate(record)
-                    writer_manager.write_row(raw_doc)
+                    stats[writer_manager.write_row(raw_doc)] += 1
 
                     # 3. Transform and write one-to-many Ingredient records
                     for ing_data in record.get("ingredients", []):
                         ingredient = Ingredient(document_id=doc_id, **ing_data)
-                        writer_manager.write_row(ingredient)
+                        stats[writer_manager.write_row(ingredient)] += 1
 
                     # 4. Transform and write one-to-many Packaging records
                     for pkg_data in record.get("packaging", []):
                         packaging = Packaging(document_id=doc_id, **pkg_data)
-                        writer_manager.write_row(packaging)
+                        stats[writer_manager.write_row(packaging)] += 1
 
                     # 5. Transform and write one-to-many MarketingStatus records
                     for mkt_data in record.get("marketing_status", []):
                         status = MarketingStatus(document_id=doc_id, **mkt_data)
-                        writer_manager.write_row(status)
+                        stats[writer_manager.write_row(status)] += 1
 
                     # 6. Transform and write one-to-many ProductNdc records
                     for ndc_data in record.get("product_ndcs", []):
                         ndc = ProductNdc(document_id=doc_id, **ndc_data)
-                        writer_manager.write_row(ndc)
+                        stats[writer_manager.write_row(ndc)] += 1
 
                 except Exception as e:
                     logger.error(f"Failed to transform record with doc_id {doc_id}. Error: {e}")
                     # Continue processing other records
                     continue
 
-                record_count += 1
-                if record_count % 1000 == 0:
-                    logger.info(f"Processed {record_count} records...")
+                if (i + 1) % 1000 == 0:
+                    logger.info(f"Processed {i + 1} source documents...")
 
-        logger.info(f"Transformation complete. Total records processed: {record_count}")
+        total_records = sum(stats.values())
+        logger.info(
+            f"Transformation complete. Total XMLs processed: {stats.get('products.csv', 0)}. Total rows created: {total_records}"
+        )
+        return dict(stats)
