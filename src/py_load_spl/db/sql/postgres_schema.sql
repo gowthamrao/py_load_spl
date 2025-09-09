@@ -64,14 +64,14 @@ CREATE TABLE IF NOT EXISTS products (
     route_of_administration TEXT,
     is_latest_version BOOLEAN,
     loaded_at TIMESTAMPTZ DEFAULT now(),
-    CONSTRAINT fk_document_id FOREIGN KEY (document_id) REFERENCES spl_raw_documents(document_id)
+    CONSTRAINT fk_products_spl_raw_documents FOREIGN KEY (document_id) REFERENCES spl_raw_documents(document_id)
 );
 
 CREATE TABLE IF NOT EXISTS product_ndcs (
     id BIGSERIAL PRIMARY KEY,
     document_id UUID,
     ndc_code TEXT,
-    CONSTRAINT fk_document_id FOREIGN KEY (document_id) REFERENCES products(document_id)
+    CONSTRAINT fk_product_ndcs_products FOREIGN KEY (document_id) REFERENCES products(document_id)
 );
 
 CREATE TABLE IF NOT EXISTS ingredients (
@@ -83,7 +83,7 @@ CREATE TABLE IF NOT EXISTS ingredients (
     strength_denominator TEXT,
     unit_of_measure TEXT,
     is_active_ingredient BOOLEAN,
-    CONSTRAINT fk_document_id FOREIGN KEY (document_id) REFERENCES products(document_id)
+    CONSTRAINT fk_ingredients_products FOREIGN KEY (document_id) REFERENCES products(document_id)
 );
 
 CREATE TABLE IF NOT EXISTS packaging (
@@ -92,7 +92,7 @@ CREATE TABLE IF NOT EXISTS packaging (
     package_ndc TEXT,
     package_description TEXT,
     package_type TEXT,
-    CONSTRAINT fk_document_id FOREIGN KEY (document_id) REFERENCES products(document_id)
+    CONSTRAINT fk_packaging_products FOREIGN KEY (document_id) REFERENCES products(document_id)
 );
 
 CREATE TABLE IF NOT EXISTS marketing_status (
@@ -101,7 +101,7 @@ CREATE TABLE IF NOT EXISTS marketing_status (
     marketing_category TEXT,
     start_date DATE,
     end_date DATE,
-    CONSTRAINT fk_document_id FOREIGN KEY (document_id) REFERENCES products(document_id)
+    CONSTRAINT fk_marketing_status_products FOREIGN KEY (document_id) REFERENCES products(document_id)
 );
 
 -- Staging Tables (for bulk loading)
@@ -111,3 +111,25 @@ CREATE TABLE IF NOT EXISTS product_ndcs_staging (LIKE product_ndcs INCLUDING DEF
 CREATE TABLE IF NOT EXISTS ingredients_staging (LIKE ingredients INCLUDING DEFAULTS);
 CREATE TABLE IF NOT EXISTS packaging_staging (LIKE packaging INCLUDING DEFAULTS);
 CREATE TABLE IF NOT EXISTS marketing_status_staging (LIKE marketing_status INCLUDING DEFAULTS);
+
+-- =================================================================
+-- Indexes for Query Performance
+-- =================================================================
+
+-- Index to support the `is_latest_version` calculation and finding product versions
+CREATE INDEX IF NOT EXISTS idx_products_versioning ON products (set_id, version_number DESC, effective_time DESC);
+
+-- Index to quickly find the latest versions of all products
+CREATE INDEX IF NOT EXISTS idx_products_is_latest ON products (is_latest_version);
+
+-- Index for looking up products by their NDC code
+CREATE INDEX IF NOT EXISTS idx_product_ndcs_ndc_code ON product_ndcs (ndc_code);
+
+-- Index for finding products by ingredient substance code (UNII)
+CREATE INDEX IF NOT EXISTS idx_ingredients_substance_code ON ingredients (substance_code);
+
+-- Index for looking up products by their packaging NDC
+CREATE INDEX IF NOT EXISTS idx_packaging_package_ndc ON packaging (package_ndc);
+
+-- Index to quickly find all raw documents for a product line
+CREATE INDEX IF NOT EXISTS idx_spl_raw_documents_set_id ON spl_raw_documents (set_id);

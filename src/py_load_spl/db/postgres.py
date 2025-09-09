@@ -25,6 +25,8 @@ class PostgresLoader(DatabaseLoader):
     def __init__(self, db_settings: DatabaseSettings) -> None:
         self.settings = db_settings
         self.conn: connection | None = None
+        # Store definitions of dropped objects (indexes, FKs) to recreate them later
+        self.dropped_object_definitions: list[str] = []
         logger.info("Initialized PostgreSQL Loader.")
 
     @contextmanager
@@ -156,12 +158,113 @@ class PostgresLoader(DatabaseLoader):
                 self.conn.rollback()
             raise
 
-    def pre_load_optimization(self) -> None:
+    def _get_optimizable_objects(self, cur: Any) -> None:
+        """
+        Dynamically queries the database to get the definitions of all foreign keys
+        and indexes on the production tables. This is more robust than hardcoding.
+        """
+        logger.info("Querying database for existing indexes and foreign keys...")
+        # Query for foreign key constraints
+        cur.execute("""
+            SELECT 'ALTER TABLE ' || n.nspname || '."' || conrel.relname || '" ADD CONSTRAINT "' || c.conname || '" ' || pg_get_constraintdef(c.oid) || ';'
+            FROM pg_constraint c
+            JOIN pg_class conrel ON conrel.oid = c.conrelid
+            JOIN pg_namespace n ON n.oid = conrel.relnamespace
+            WHERE c.contype = 'f' AND conrel.relname IN (
+                'products', 'product_ndcs', 'ingredients', 'packaging', 'marketing_status'
+            );
+        """)
+        fk_defs = [row[0] for row in cur.fetchall()]
+        logger.info(f"Found {len(fk_defs)} foreign key constraints.")
+
+        # Query for index definitions
+        cur.execute("""
+            SELECT indexdef
+            FROM pg_indexes
+            WHERE tablename IN (
+                'products', 'product_ndcs', 'ingredients', 'packaging', 'marketing_status', 'spl_raw_documents'
+            ) AND indexname NOT LIKE 'pg_%%' AND indexname NOT IN (
+                -- Exclude primary key indexes, which are not dropped
+                'products_pkey', 'product_ndcs_pkey', 'ingredients_pkey', 'packaging_pkey', 'marketing_status_pkey', 'spl_raw_documents_pkey'
+            );
+        """)
+        idx_defs = [row[0] for row in cur.fetchall()]
+        logger.info(f"Found {len(idx_defs)} indexes.")
+
+        self.dropped_object_definitions = fk_defs + idx_defs
+
+    def _drop_optimizations(self, cur: Any) -> None:
+        """Drops all foreign keys and indexes found by the getter."""
+        if not self.dropped_object_definitions:
+            logger.warning("No optimizable objects found to drop.")
+            return
+
+        logger.info(f"Dropping {len(self.dropped_object_definitions)} indexes and foreign keys...")
+        # Drop foreign keys first
+        cur.execute("""
+            SELECT 'ALTER TABLE ' || n.nspname || '."' || conrel.relname || '" DROP CONSTRAINT "' || c.conname || '";'
+            FROM pg_constraint c
+            JOIN pg_class conrel ON conrel.oid = c.conrelid
+            JOIN pg_namespace n ON n.oid = conrel.relnamespace
+            WHERE c.contype = 'f' AND conrel.relname IN (
+                'products', 'product_ndcs', 'ingredients', 'packaging', 'marketing_status'
+            );
+        """)
+        for row in cur.fetchall():
+            logger.debug(f"Executing: {row[0]}")
+            cur.execute(row[0])
+
+        # Then drop indexes
+        cur.execute("""
+            SELECT 'DROP INDEX IF EXISTS "' || indexname || '";'
+            FROM pg_indexes
+            WHERE tablename IN (
+                'products', 'product_ndcs', 'ingredients', 'packaging', 'marketing_status', 'spl_raw_documents'
+            ) AND indexname NOT LIKE 'pg_%%' AND indexname NOT IN (
+                 'products_pkey', 'product_ndcs_pkey', 'ingredients_pkey', 'packaging_pkey', 'marketing_status_pkey', 'spl_raw_documents_pkey'
+            );
+        """)
+        for row in cur.fetchall():
+            logger.debug(f"Executing: {row[0]}")
+            cur.execute(row[0])
+        logger.info("Finished dropping objects.")
+
+    def _recreate_optimizations(self, cur: Any) -> None:
+        """Recreates all the objects that were previously dropped."""
+        if not self.dropped_object_definitions:
+            logger.warning("No stored object definitions to recreate.")
+            return
+
+        logger.info(f"Recreating {len(self.dropped_object_definitions)} indexes and foreign keys...")
+        for definition in self.dropped_object_definitions:
+            logger.debug(f"Executing: {definition}")
+            cur.execute(definition)
+        logger.info("Finished recreating objects.")
+        # Clear the list after we're done
+        self.dropped_object_definitions = []
+
+    def pre_load_optimization(self, mode: Literal["full-load", "delta-load"]) -> None:
+        """
+        For full loads, drops indexes and foreign keys to speed up data insertion.
+        For delta loads, this step is skipped.
+        """
         logger.info("Performing pre-load optimizations...")
-        # In a real-world scenario for very large loads, we would drop indexes
-        # and foreign keys here to speed up the data insertion.
-        # For this implementation, we will just log the action.
-        logger.info("Pre-load optimization step complete (simulation).")
+        if mode != "full-load" or not self.settings.optimize_full_load:
+            logger.info("Skipping index/FK drop for this run.")
+            return
+
+        try:
+            with self._get_conn() as conn:
+                with conn.cursor() as cur:
+                    self._get_optimizable_objects(cur)
+                    self._drop_optimizations(cur)
+                conn.commit()
+            logger.info("Pre-load optimization step complete.")
+        except psycopg2.Error as e:
+            logger.error(f"Pre-load optimization failed: {e}")
+            if self.conn:
+                self.conn.rollback()
+            raise
 
     def merge_from_staging(self, mode: Literal["full-load", "delta-load"]) -> None:
         """
@@ -190,9 +293,10 @@ class PostgresLoader(DatabaseLoader):
 
                     if mode == "full-load":
                         logger.info("Truncating production tables for full load...")
+                        # We don't need CASCADE anymore since we dropped the FKs
                         for table in reversed(tables_in_dependency_order):
                             logger.debug(f"Truncating {table}...")
-                            cur.execute(f"TRUNCATE TABLE {table} CASCADE;")
+                            cur.execute(f"TRUNCATE TABLE {table};")
 
                         logger.info("Inserting all data from staging...")
                         for table in tables_in_dependency_order:
@@ -230,10 +334,6 @@ class PostgresLoader(DatabaseLoader):
 
                     # Final step: Update the is_latest_version flag for all affected products.
                     # This is done for both full and delta loads to ensure consistency.
-                    # NOTE: This query relies on the transaction's visibility of the rows
-                    # inserted/updated in the 'products' table earlier in this same transaction.
-                    # It correctly identifies all set_ids from the staging batch and then re-ranks
-                    # all versions (including new ones) for those set_ids in the main products table.
                     logger.info("Updating is_latest_version flag for all affected products...")
                     cur.execute("""
                         WITH affected_set_ids AS (
@@ -269,20 +369,33 @@ class PostgresLoader(DatabaseLoader):
                 self.conn.rollback()
             raise
 
-    def post_load_cleanup(self) -> None:
-        logger.info("Performing post-load cleanup (running VACUUM ANALYZE)...")
-        # Recreate indexes/FKs would happen here.
-        # Running ANALYZE is crucial for the query planner after a large load.
+    def post_load_cleanup(self, mode: Literal["full-load", "delta-load"]) -> None:
+        """
+        For full loads, recreates the indexes and FKs.
+        For all loads, runs VACUUM ANALYZE for query planner optimization.
+        """
+        logger.info("Performing post-load cleanup...")
         try:
+            # Step 1: Recreate optimizations, if applicable. This is done in its own
+            # transaction which is committed immediately after.
+            if mode == "full-load" and self.settings.optimize_full_load:
+                with self._get_conn() as conn:
+                    with conn.cursor() as cur:
+                        self._recreate_optimizations(cur)
+                    conn.commit()
+
+            # Step 2: Run VACUUM ANALYZE. This must be done outside a transaction
+            # block, so we use a connection in autocommit mode.
             with self._get_conn() as conn:
-                # Autocommit mode for VACUUM
+                logger.info("Running VACUUM ANALYZE...")
                 conn.autocommit = True
                 with conn.cursor() as cur:
-                    cur.execute("VACUUM ANALYZE;")
+                    cur.execute("VACUUM (VERBOSE, ANALYZE);")
                 conn.autocommit = False
+
             logger.info("Post-load cleanup complete.")
         except psycopg2.Error as e:
-            logger.error(f"Post-load cleanup failed: {e}")
+            logger.error(f"Post-load cleanup failed: {e}", exc_info=True)
             raise
 
     def start_run(self, mode: str) -> int:
