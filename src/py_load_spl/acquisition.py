@@ -15,8 +15,8 @@ from rich.progress import (
     TransferSpeedColumn,
 )
 
-from py_load_spl.config import Settings, get_settings
-from py_load_spl.db.postgres import PostgresLoader
+from .config import Settings, get_settings
+from .db.base import DatabaseLoader
 
 logger = logging.getLogger(__name__)
 
@@ -124,7 +124,7 @@ def download_archive(archive: Archive, settings: Settings) -> Path:
         raise
 
 
-def download_spl_archives() -> List[Archive]:
+def download_spl_archives(loader: DatabaseLoader) -> List[Archive]:
     """
     Main function for F001: Data Acquisition.
 
@@ -132,15 +132,15 @@ def download_spl_archives() -> List[Archive]:
     available archives, compares it against previously processed archives
     stored in the database, and downloads only the new ones.
 
+    Args:
+        loader: An initialized database loader instance.
+
     Returns:
         A list of Archive objects that were newly downloaded.
     """
     logger.info("Starting stateful SPL data acquisition...")
     settings = get_settings()
 
-    # Instantiate loader to get state from the database.
-    # In a larger application, this might be handled by dependency injection.
-    loader = PostgresLoader(settings.db)
     try:
         processed_archives_names = loader.get_processed_archives()
     except Exception as e:

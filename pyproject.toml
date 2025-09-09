@@ -56,6 +56,7 @@ dev = [
     "pytest>=8.4.2",
     "pytest-cov",
     "testcontainers",
+    "psycopg2-binary",
     "ruff>=0.12.12",
     "black>=25.1.0",
     "mypy>=1.17.1",

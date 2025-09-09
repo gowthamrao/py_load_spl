@@ -162,22 +162,23 @@ def parse_spl_file(file_path: Path) -> dict[str, Any]:
                             }
                         )
 
-                # New, more robust marketing status extraction
-                marketing_acts = _xpa(packaging_section, "./hl7:subject/hl7:marketingAct")
-                for act in marketing_acts:
-                    status_code_el = _xp(act, "./hl7:statusCode")
-                    effective_time_el = _xp(act, "./hl7:effectiveTime")
+            # New, more robust marketing status extraction
+            # Search for all marketing acts anywhere in the structured body
+            marketing_acts = _xpa(body, ".//hl7:subject/hl7:marketingAct")
+            for act in marketing_acts:
+                status_code_el = _xp(act, "./hl7:statusCode")
+                effective_time_el = _xp(act, "./hl7:effectiveTime")
 
-                    start_date_el = _xp(effective_time_el, "./hl7:low") if effective_time_el is not None else None
-                    end_date_el = _xp(effective_time_el, "./hl7:high") if effective_time_el is not None else None
+                start_date_el = _xp(effective_time_el, "./hl7:low") if effective_time_el is not None else None
+                end_date_el = _xp(effective_time_el, "./hl7:high") if effective_time_el is not None else None
 
-                    data["marketing_status"].append(
-                        {
-                            "marketing_category": status_code_el.get("code") if status_code_el is not None else None,
-                            "start_date": start_date_el.get("value") if start_date_el is not None else None,
-                            "end_date": end_date_el.get("value") if end_date_el is not None else None,
-                        }
-                    )
+                data["marketing_status"].append(
+                    {
+                        "marketing_category": status_code_el.get("code") if status_code_el is not None else None,
+                        "start_date": start_date_el.get("value") if start_date_el is not None else None,
+                        "end_date": end_date_el.get("value") if end_date_el is not None else None,
+                    }
+                )
 
     except (AttributeError, TypeError, ValueError) as e:
         # F002.4: Gracefully handle parsing errors

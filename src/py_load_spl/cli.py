@@ -8,8 +8,10 @@ import typer
 from rich.console import Console
 
 from . import __name__ as app_name
-from .acquisition import Archive
+from .acquisition import Archive, download_spl_archives
 from .config import get_settings
+from .db.base import DatabaseLoader
+from .db.postgres import PostgresLoader
 from .parsing import iter_spl_files
 from .transformation import Transformer
 
@@ -41,20 +43,27 @@ def main(
         console.print("[bold red]No command specified. Use --help for options.[/bold red]")
 
 
-from .acquisition import download_spl_archives
-
-
 @app.command()
 def download(ctx: typer.Context) -> None:
     """
     F001: Download SPL archives from the FDA source.
     This command fetches the list of available SPL data archives and
-    downloads a sample file to demonstrate the functionality.
+    downloads only new archives based on the database state.
     """
+    settings = ctx.obj
+    # This is a simple factory, could be expanded for other adapters
+    if settings.db.adapter == "postgresql":
+        loader: DatabaseLoader = PostgresLoader(settings.db)
+    else:
+        console.print(f"[bold red]Error: Unsupported DB adapter '{settings.db.adapter}'[/bold red]")
+        raise typer.Exit(1)
+
     console.print("[bold green]Starting data acquisition process...[/bold green]")
     try:
-        download_spl_archives()
-        console.print("[bold green]Data acquisition command finished.[/bold green]")
+        newly_downloaded = download_spl_archives(loader)
+        console.print(
+            f"[bold green]Data acquisition command finished. Downloaded {len(newly_downloaded)} new archives.[/bold green]"
+        )
     except Exception as e:
         console.print(f"[bold red]An error occurred during data acquisition: {e}[/bold red]")
         raise typer.Exit(1)
@@ -65,13 +74,11 @@ def init(ctx: typer.Context) -> None:
     """
     F008.3: Initialize the database schema.
     """
-    from .db.postgres import PostgresLoader
-
     console.print("[bold green]Initializing database schema...[/bold green]")
     settings = ctx.obj
     # This is a simple factory, could be expanded for other adapters
     if settings.db.adapter == "postgresql":
-        loader = PostgresLoader(settings.db)
+        loader: DatabaseLoader = PostgresLoader(settings.db)
     else:
         console.print(f"[bold red]Error: Unsupported DB adapter '{settings.db.adapter}'[/bold red]")
         raise typer.Exit(1)
@@ -82,9 +89,6 @@ def init(ctx: typer.Context) -> None:
     except Exception as e:
         console.print(f"[bold red]Schema initialization failed: {e}[/bold red]")
         raise typer.Exit(1)
-
-
-from .db.postgres import PostgresLoader
 
 
 @app.command()
@@ -111,7 +115,7 @@ def full_load(
 
     # Initialize the correct database loader
     if settings.db.adapter == "postgresql":
-        loader = PostgresLoader(settings.db)
+        loader: DatabaseLoader = PostgresLoader(settings.db)
     else:
         console.print(f"[bold red]Error: Unsupported DB adapter '{settings.db.adapter}'[/bold red]")
         raise typer.Exit(1)
@@ -165,16 +169,22 @@ def delta_load(ctx: typer.Context) -> None:
     settings = ctx.obj
     console.print("[bold blue]Starting delta data load...[/bold blue]")
     run_id = None
+    loader: DatabaseLoader | None = None  # Initialize loader to None
     try:
+        # Initialize the correct database loader
+        if settings.db.adapter == "postgresql":
+            loader = PostgresLoader(settings.db)
+        else:
+            console.print(f"[bold red]Error: Unsupported DB adapter '{settings.db.adapter}'[/bold red]")
+            raise typer.Exit(1)
+
         # 1. Acquisition: Find and download new archives
         console.print("[cyan]Step 1: Acquiring new archives...[/cyan]")
-        newly_downloaded_archives: List[Archive] = download_spl_archives()
+        newly_downloaded_archives: List[Archive] = download_spl_archives(loader)
         if not newly_downloaded_archives:
             console.print("[green]No new archives to process. Database is up to date.[/green]")
             return
 
-        # Initialize the loader once
-        loader = PostgresLoader(settings.db)
         run_id = loader.start_run(mode="delta-load")
         total_archives_processed = 0
 
@@ -213,14 +223,14 @@ def delta_load(ctx: typer.Context) -> None:
                 # Continue to the next archive
                 continue
 
-        loader.end_run(run_id, "SUCCESS", archives_processed=total_archives_processed)
+        if run_id:
+            loader.end_run(run_id, "SUCCESS", archives_processed=total_archives_processed)
         console.print("[bold green]Delta load process finished successfully.[/bold green]")
 
     except Exception as e:
         console.print(f"[bold red]An error occurred during the delta load process: {e}[/bold red]")
-        if run_id:
-            # This assumes loader was initialized
-            PostgresLoader(settings.db).end_run(run_id, "FAILED", error_log=str(e))
+        if loader and run_id:
+            loader.end_run(run_id, "FAILED", error_log=str(e))
         raise typer.Exit(1)
 
 

@@ -5,7 +5,7 @@
 groups = ["default", "dev", "postgresql"]
 strategy = ["inherit_metadata"]
 lock_version = "4.5.0"
-content_hash = "sha256:3af992a9b3d3a6aa71b2062520e67d2771b498d143a6a34caaecf125fa9c04cc"
+content_hash = "sha256:612b88b8f1f068c35bd06de3de492126832caaa3369a3b65557ae01eff3af3b0"
 
 [[metadata.targets]]
 requires_python = ">=3.10"
@@ -718,7 +718,7 @@ name = "psycopg2-binary"
 version = "2.9.10"
 requires_python = ">=3.8"
 summary = "psycopg2 - Python-PostgreSQL Database Adapter"
-groups = ["postgresql"]
+groups = ["dev", "postgresql"]
 files = [
     {file = "psycopg2-binary-2.9.10.tar.gz", hash = "sha256:4b3df0e6990aa98acda57d983942eff13d824135fe2250e6522edaa782a06de2"},
     {file = "psycopg2_binary-2.9.10-cp310-cp310-macosx_12_0_x86_64.whl", hash = "sha256:0ea8e3d0ae83564f2fc554955d327fa081d065c8ca5cc6d2abb643e2c9c1200f"},
