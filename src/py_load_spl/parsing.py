@@ -1,50 +1,34 @@
 import logging
 from collections.abc import Generator
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from lxml import etree
 
 logger = logging.getLogger(__name__)
 
-# Define the XML namespace for HL7 v3
-# This is crucial for XPath queries to work correctly.
+# Define the XML namespace for HL7 v3, crucial for XPath queries.
 NAMESPACES = {"hl7": "urn:hl7-org:v3"}
 
 
 def _xp(element: etree._Element, path: str) -> Any | None:
-    """
-    Helper function to perform an XPath query with the HL7 namespace.
-    Returns the first result or None if not found.
-    """
+    """Helper function for a single XPath query with the HL7 namespace."""
     return element.find(path, namespaces=NAMESPACES)
 
 
 def _xpa(element: etree._Element, path: str) -> list[etree._Element]:
-    """
-    Helper function to perform an XPath query with the HL7 namespace.
-    Returns all results or an empty list if not found.
-    """
+    """Helper function for multiple XPath queries with the HL7 namespace."""
     return element.findall(path, namespaces=NAMESPACES)
 
 
 def parse_spl_file(file_path: Path) -> dict[str, Any]:
     """
     Parses a single SPL XML file to extract key information (F002).
-
-    This function uses `lxml.etree.iterparse` for memory-efficient parsing
-    and is designed to be resilient to missing elements. It also captures
-    the raw XML content for the 'Full Representation' (F004).
-
-    Args:
-        file_path: The path to the SPL XML file.
-
-    Returns:
-        A dictionary containing the extracted data.
+    Uses lxml.etree.iterparse for memory-efficient parsing and is designed
+    to be resilient to missing elements.
     """
     logger.debug(f"Parsing SPL file: {file_path}")
 
-    # F004.1: Capture the complete, original XML content.
     try:
         raw_xml_content = file_path.read_text(encoding="utf-8")
     except IOError as e:
@@ -54,8 +38,6 @@ def parse_spl_file(file_path: Path) -> dict[str, Any]:
     context = etree.iterparse(
         file_path, events=("end",), tag=f"{{{NAMESPACES['hl7']}}}document"
     )
-
-    # Since we expect only one <document> element, we process the first one we find.
     _, root = next(context)
 
     data: dict[str, Any] = {
@@ -66,129 +48,91 @@ def parse_spl_file(file_path: Path) -> dict[str, Any]:
     }
 
     try:
-        # F002.3: Extract metadata
+        # Extract metadata (F002.3)
         data["document_id"] = _xp(root, ".//hl7:id").get("root")
         data["set_id"] = _xp(root, ".//hl7:setId").get("root")
         data["version_number"] = int(_xp(root, ".//hl7:versionNumber").get("value", 0))
         data["effective_time"] = _xp(root, ".//hl7:effectiveTime").get("value")
-
-        # Add raw XML data for Full Representation
         data["raw_data"] = raw_xml_content
         data["source_filename"] = file_path.name
 
-        # Extract product details
-        product_element = _xp(root, ".//hl7:manufacturedProduct/hl7:manufacturedProduct")
-        if product_element is not None:
-            product_name_el = _xp(product_element, ".//hl7:name")
-            if product_name_el is not None:
-                data["product_name"] = product_name_el.text
+        # Locate the parent 'manufacturedProduct' element which holds both the product and manufacturer info
+        parent_product_el = _xp(root, ".//hl7:manufacturedProduct")
+        if parent_product_el is not None:
+            product_element = _xp(parent_product_el, "./hl7:manufacturedProduct")
+            if product_element is not None:
+                # Extract product details
+                product_name_el = _xp(product_element, ".//hl7:name")
+                data["product_name"] = product_name_el.text if product_name_el is not None else None
 
-            dosage_form_el = _xp(product_element, ".//hl7:formCode")
-            if dosage_form_el is not None:
-                data["dosage_form"] = dosage_form_el.get("displayName")
+                dosage_form_el = _xp(product_element, ".//hl7:formCode")
+                data["dosage_form"] = dosage_form_el.get("displayName") if dosage_form_el is not None else None
 
-            route_code_el = _xp(product_element, ".//hl7:routeCode")
-            if route_code_el is not None:
-                data["route_of_administration"] = route_code_el.get("displayName")
+                route_code_el = _xp(product_element, ".//hl7:routeCode")
+                data["route_of_administration"] = route_code_el.get("displayName") if route_code_el is not None else None
 
-            # Extract Product NDCs
-            for code_el in _xpa(
-                product_element,
-                ".//hl7:asEquivalentEntity/hl7:code[@codeSystem='2.16.840.1.113883.6.69']",
-            ):
-                ndc_code = code_el.get("code")
-                if ndc_code:
-                    data["product_ndcs"].append({"ndc_code": ndc_code})
+                # Extract Product NDCs
+                for code_el in _xpa(product_element, ".//hl7:asEquivalentEntity/hl7:code[@codeSystem='2.16.840.1.113883.6.69']"):
+                    if ndc_code := code_el.get("code"):
+                        data["product_ndcs"].append({"ndc_code": ndc_code})
 
-        manufacturer_el = _xp(root, ".//hl7:manufacturer/hl7:name")
-        if manufacturer_el is not None:
-            data["manufacturer_name"] = manufacturer_el.text
-
-        # Extract ingredients (F003.2)
-        if product_element is not None:
-            for ingredient_el in _xpa(product_element, ".//hl7:ingredient"):
-                substance = _xp(ingredient_el, ".//hl7:ingredientSubstance")
-                quantity = _xp(ingredient_el, ".//hl7:quantity")
-                numerator = _xp(quantity, ".//hl7:numerator") if quantity is not None else None
-                denominator = _xp(quantity, ".//hl7:denominator") if quantity is not None else None
-
-                substance_name_el = _xp(substance, ".//hl7:name") if substance is not None else None
-                substance_code_el = _xp(substance, ".//hl7:code") if substance is not None else None
-
-                data["ingredients"].append(
-                    {
+                # Extract ingredients (F003.2)
+                for ingredient_el in _xpa(product_element, ".//hl7:ingredient"):
+                    substance = _xp(ingredient_el, ".//hl7:ingredientSubstance")
+                    quantity = _xp(ingredient_el, ".//hl7:quantity")
+                    numerator = _xp(quantity, ".//hl7:numerator") if quantity is not None else None
+                    denominator = _xp(quantity, ".//hl7:denominator") if quantity is not None else None
+                    substance_name_el = _xp(substance, ".//hl7:name") if substance is not None else None
+                    substance_code_el = _xp(substance, ".//hl7:code") if substance is not None else None
+                    data["ingredients"].append({
                         "ingredient_name": substance_name_el.text if substance_name_el is not None else None,
                         "substance_code": substance_code_el.get("code") if substance_code_el is not None else None,
                         "is_active_ingredient": ingredient_el.get("classCode") == "ACT",
                         "strength_numerator": numerator.get("value") if numerator is not None else None,
                         "strength_denominator": denominator.get("value") if denominator is not None else None,
                         "unit_of_measure": numerator.get("unit") if numerator is not None else None,
-                    }
-                )
+                    })
 
-        # Extract from the structured body
+            # Extract manufacturer from the parent element
+            manufacturer_el = _xp(parent_product_el, "./hl7:manufacturer/hl7:name")
+            data["manufacturer_name"] = manufacturer_el.text if manufacturer_el is not None else None
+
+        # Extract from the structured body for packaging and marketing status
         body = _xp(root, ".//hl7:component/hl7:structuredBody")
         if body is not None:
-            # Find the packaging section
-            packaging_section = None
+            # Packaging (F003.2)
             for section in _xpa(body, ".//hl7:section"):
                 code_el = _xp(section, "hl7:code")
-                if code_el is not None and code_el.get("code") in ("51945-4", "34069-5"):
-                    packaging_section = section
-                    break
-
-            if packaging_section is not None:
-                # Using iterdescendants to find descendant nodes
-                for part_el in packaging_section.iterdescendants(
-                    f"{{{NAMESPACES['hl7']}}}part"
-                ):
-                    part_code_el = _xp(part_el, ".//hl7:code")
+                if code_el is not None and code_el.get("code") in ('34069-5', '51945-4'):
+                    for part_el in section.iterdescendants(f"{{{NAMESPACES['hl7']}}}part"):
+                        part_code_el = _xp(part_el, ".//hl7:code")
                     package_ndc = part_code_el.get("code") if part_code_el is not None else None
-
-                    desc_el = _xp(part_el, ".//hl7:desc") or _xp(part_el, ".//hl7:name")
-                    package_desc = desc_el.text if desc_el is not None else None
-
-                    form_code_el = _xp(part_el, ".//hl7:formCode")
-                    package_type = (
-                        form_code_el.get("displayName") if form_code_el is not None else None
-                    )
-
                     if package_ndc:
-                        data["packaging"].append(
-                            {
-                                "package_ndc": package_ndc,
-                                "package_description": package_desc,
-                                "package_type": package_type,
-                            }
-                        )
+                        desc_el = _xp(part_el, ".//hl7:desc") or _xp(part_el, ".//hl7:name")
+                        form_code_el = _xp(part_el, ".//hl7:formCode")
+                        data["packaging"].append({
+                            "package_ndc": package_ndc,
+                            "package_description": desc_el.text if desc_el is not None else None,
+                            "package_type": form_code_el.get("displayName") if form_code_el is not None else None,
+                        })
 
-            # New, more robust marketing status extraction
-            # Search for all marketing acts anywhere in the structured body
-            marketing_acts = _xpa(body, ".//hl7:subject/hl7:marketingAct")
-            for act in marketing_acts:
+            # Marketing Status
+            for act in _xpa(body, ".//hl7:subject/hl7:marketingAct"):
                 status_code_el = _xp(act, "./hl7:statusCode")
                 effective_time_el = _xp(act, "./hl7:effectiveTime")
-
                 start_date_el = _xp(effective_time_el, "./hl7:low") if effective_time_el is not None else None
                 end_date_el = _xp(effective_time_el, "./hl7:high") if effective_time_el is not None else None
-
-                data["marketing_status"].append(
-                    {
-                        "marketing_category": status_code_el.get("code") if status_code_el is not None else None,
-                        "start_date": start_date_el.get("value") if start_date_el is not None else None,
-                        "end_date": end_date_el.get("value") if end_date_el is not None else None,
-                    }
-                )
+                data["marketing_status"].append({
+                    "marketing_category": status_code_el.get("code") if status_code_el is not None else None,
+                    "start_date": start_date_el.get("value") if start_date_el is not None else None,
+                    "end_date": end_date_el.get("value") if end_date_el is not None else None,
+                })
 
     except (AttributeError, TypeError, ValueError) as e:
-        # F002.4: Gracefully handle parsing errors
-        logger.error(
-            f"Error parsing file {file_path}. Some elements may be missing. Error: {e}"
-        )
+        logger.error(f"Error parsing file {file_path}. Some elements may be missing. Error: {e}")
 
-    # Clear the root element to free memory
+    # Free up memory
     root.clear()
-    # Also clear the parent of the root element
     while root.getprevious() is not None:
         del root.getparent()[0]
 
@@ -197,8 +141,7 @@ def parse_spl_file(file_path: Path) -> dict[str, Any]:
 
 def iter_spl_files(source_dir: Path) -> Generator[dict[str, Any], None, None]:
     """
-    A generator that finds all XML files in a directory, parses them,
-    and yields the structured data.
+    Finds all XML files in a directory, parses them, and yields the structured data.
     """
     logger.info(f"Searching for SPL XML files in {source_dir}...")
     xml_files = list(source_dir.glob("**/*.xml"))
@@ -210,8 +153,6 @@ def iter_spl_files(source_dir: Path) -> Generator[dict[str, Any], None, None]:
         try:
             yield parse_spl_file(xml_file)
         except Exception as e:
-            # F002.4: Log error and move to quarantine (not implemented yet)
             logger.error(f"Failed to parse {xml_file}, skipping. Error: {e}")
-            # In a real implementation, we would move the file here.
             pass
     logger.info(f"Finished processing {len(xml_files)} SPL files.")

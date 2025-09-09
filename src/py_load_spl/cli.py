@@ -1,20 +1,17 @@
 import logging
 import tempfile
-import zipfile
 from pathlib import Path
-from typing import List
 
 import typer
-from python_json_logger import jsonlogger
 from rich.console import Console
 
 from . import __name__ as app_name
-from .acquisition import Archive, download_spl_archives
 from .config import get_settings
 from .db.base import DatabaseLoader
 from .db.postgres import PostgresLoader
 from .parsing import iter_spl_files
 from .transformation import Transformer
+from .util import setup_logging
 
 app = typer.Typer(name=app_name)
 console = Console()
@@ -30,91 +27,27 @@ def main(
         "json", help="Set the log format ('json' or 'text').", envvar="LOG_FORMAT"
     ),
 ) -> None:
-    """
-    A CLI for the SPL Data Loader.
-    """
-    # F009.1: Setup structured logging
-    logger = logging.getLogger()
-    logger.setLevel(log_level.upper())
-
-    # Remove any existing handlers
-    for handler in logger.handlers[:]:
-        logger.removeHandler(handler)
-
-    handler = logging.StreamHandler()
-
-    if log_format.lower() == "json":
-        # Add a timestamp to the JSON log record
-        formatter = jsonlogger.JsonFormatter(
-            "%(asctime)s %(name)s %(levelname)s %(message)s"
-        )
-    else:
-        formatter = logging.Formatter(
-            "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-        )
-
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
-
-    logging.getLogger(__name__).info(
-        f"Logging level set to {log_level}, format set to {log_format}"
-    )
-
-    # Load settings and store them in the context for other commands to use
+    """A CLI for the SPL Data Loader."""
+    setup_logging(log_level, log_format)
     ctx.obj = get_settings()
-
     if ctx.invoked_subcommand is None:
-        console.print(
-            "[bold red]No command specified. Use --help for options.[/bold red]"
-        )
+        console.print("[bold red]No command specified. Use --help for options.[/bold red]")
 
 
-@app.command()
-def download(ctx: typer.Context) -> None:
-    """
-    F001: Download SPL archives from the FDA source.
-    This command fetches the list of available SPL data archives and
-    downloads only new archives based on the database state.
-    """
-    settings = ctx.obj
-    # This is a simple factory, could be expanded for other adapters
+def get_db_loader(settings) -> DatabaseLoader:
     if settings.db.adapter == "postgresql":
-        loader: DatabaseLoader = PostgresLoader(settings.db)
+        return PostgresLoader(settings.db)
     else:
-        console.print(
-            f"[bold red]Error: Unsupported DB adapter '{settings.db.adapter}'[/bold red]"
-        )
-        raise typer.Exit(1)
-
-    console.print("[bold green]Starting data acquisition process...[/bold green]")
-    try:
-        newly_downloaded = download_spl_archives(loader)
-        console.print(
-            f"[bold green]Data acquisition command finished. Downloaded {len(newly_downloaded)} new archives.[/bold green]"
-        )
-    except Exception as e:
-        console.print(
-            f"[bold red]An error occurred during data acquisition: {e}[/bold red]"
-        )
+        console.print(f"[bold red]Error: Unsupported DB adapter '{settings.db.adapter}'[/bold red]")
         raise typer.Exit(1)
 
 
 @app.command()
 def init(ctx: typer.Context) -> None:
-    """
-    F008.3: Initialize the database schema.
-    """
+    """F008.3: Initialize the database schema."""
     console.print("[bold green]Initializing database schema...[/bold green]")
     settings = ctx.obj
-    # This is a simple factory, could be expanded for other adapters
-    if settings.db.adapter == "postgresql":
-        loader: DatabaseLoader = PostgresLoader(settings.db)
-    else:
-        console.print(
-            f"[bold red]Error: Unsupported DB adapter '{settings.db.adapter}'[/bold red]"
-        )
-        raise typer.Exit(1)
-
+    loader = get_db_loader(settings)
     try:
         loader.initialize_schema()
         console.print("[bold green]Schema initialization complete.[/bold green]")
@@ -135,42 +68,23 @@ def full_load(
         readable=True,
     ),
 ) -> None:
-    """
-    F008.3: Perform a full data load from a local directory.
-    This command orchestrates the E-T-L process:
-    - Extracts and parses XML files from the source directory.
-    - Transforms the data into intermediate CSV files.
-    - Loads the CSV files into a PostgreSQL database.
-    """
+    """F008.3: Perform a full data load from a local directory."""
     settings = ctx.obj
     console.print(f"[bold cyan]Starting full data load from '{source}'...[/bold cyan]")
-
-    # Initialize the correct database loader
-    if settings.db.adapter == "postgresql":
-        loader: DatabaseLoader = PostgresLoader(settings.db)
-    else:
-        console.print(
-            f"[bold red]Error: Unsupported DB adapter '{settings.db.adapter}'[/bold red]"
-        )
-        raise typer.Exit(1)
-
+    loader = get_db_loader(settings)
     run_id = None
     try:
-        # Start a new run record in the ETL history
         run_id = loader.start_run(mode="full-load")
-
         with tempfile.TemporaryDirectory() as temp_dir_str:
             output_dir = Path(temp_dir_str)
             console.print(f"Intermediate CSV files will be stored in: {output_dir}")
 
-            # 1. Parsing
             console.print("[cyan]Step 1: Parsing and Transforming...[/cyan]")
             parsed_data_stream = iter_spl_files(source)
             transformer = Transformer(output_dir=output_dir)
             transformer.transform_stream(parsed_data_stream)
             console.print("[green]Parsing and Transformation complete.[/green]")
 
-            # 2. Loading
             console.print("[cyan]Step 2: Loading data into database...[/cyan]")
             loader.pre_load_optimization()
             loader.bulk_load_to_staging(output_dir)
@@ -178,114 +92,20 @@ def full_load(
             loader.post_load_cleanup()
             console.print("[green]Database loading complete.[/green]")
 
-        # If all steps succeeded, update the run status to SUCCESS
         if run_id:
-            # In a real implementation, we would count records loaded.
-            # For now, we'll use a placeholder.
-            loader.end_run(run_id, "SUCCESS", records_loaded=0)
-        console.print(
-            "[bold green]Full load process finished successfully.[/bold green]"
-        )
-
+            loader.end_run(run_id, "SUCCESS", records_loaded=-1) # Placeholder
+        console.print("[bold green]Full load process finished successfully.[/bold green]")
     except Exception as e:
-        console.print(
-            f"[bold red]An error occurred during the full load process: {e}[/bold red]"
-        )
-        # If an error occurred, update the run status to FAILED
+        console.print(f"[bold red]An error occurred during the full load process: {e}[/bold red]")
         if run_id:
-            loader.end_run(run_id, "FAILED", error_log=str(e))
+            loader.end_run(run_id, "FAILED", 0, str(e))
         raise typer.Exit(1)
 
 
 @app.command()
 def delta_load(ctx: typer.Context) -> None:
-    """
-    F008.3: Perform an incremental (delta) load.
-    Downloads new SPL archives, processes them one by one, and loads the data
-    into the database using an UPSERT strategy.
-    """
-    settings = ctx.obj
-    console.print("[bold blue]Starting delta data load...[/bold blue]")
-    run_id = None
-    loader: DatabaseLoader | None = None  # Initialize loader to None
-    try:
-        # Initialize the correct database loader
-        if settings.db.adapter == "postgresql":
-            loader = PostgresLoader(settings.db)
-        else:
-            console.print(
-                f"[bold red]Error: Unsupported DB adapter '{settings.db.adapter}'[/bold red]"
-            )
-            raise typer.Exit(1)
-
-        # 1. Acquisition: Find and download new archives
-        console.print("[cyan]Step 1: Acquiring new archives...[/cyan]")
-        newly_downloaded_archives: List[Archive] = download_spl_archives(loader)
-        if not newly_downloaded_archives:
-            console.print(
-                "[green]No new archives to process. Database is up to date.[/green]"
-            )
-            return
-
-        run_id = loader.start_run(mode="delta-load")
-        total_archives_processed = 0
-
-        # Process each archive individually
-        for archive in newly_downloaded_archives:
-            console.print(f"--> Processing archive: [bold]{archive['name']}[/bold]")
-            try:
-                with tempfile.TemporaryDirectory() as xml_dir_str, tempfile.TemporaryDirectory() as csv_dir_str:
-                    xml_dir = Path(xml_dir_str)
-                    csv_dir = Path(csv_dir_str)
-
-                    # 2. Unzip archive
-                    console.print(f"    Unzipping {archive['name']}...")
-                    download_path = Path(settings.download_path) / archive["name"]
-                    with zipfile.ZipFile(download_path, "r") as zip_ref:
-                        zip_ref.extractall(xml_dir)
-
-                    # 3. Transform
-                    console.print("    Parsing and Transforming XML to CSV...")
-                    parsed_stream = iter_spl_files(xml_dir)
-                    transformer = Transformer(output_dir=csv_dir)
-                    transformer.transform_stream(parsed_stream)
-
-                    # 4. Load
-                    console.print("    Loading data into database...")
-                    loader.bulk_load_to_staging(csv_dir)
-                    loader.merge_from_staging(mode="delta-load")
-
-                    # 5. Record success for this archive
-                    loader.record_processed_archive(
-                        archive["name"], archive["checksum"]
-                    )
-                    console.print(
-                        f"    [green]Successfully processed {archive['name']}[/green]"
-                    )
-                    total_archives_processed += 1
-
-            except Exception as e:
-                console.print(
-                    f"    [bold red]Failed to process archive {archive['name']}. Error: {e}[/bold red]"
-                )
-                # Continue to the next archive
-                continue
-
-        if run_id:
-            loader.end_run(
-                run_id, "SUCCESS", archives_processed=total_archives_processed
-            )
-        console.print(
-            "[bold green]Delta load process finished successfully.[/bold green]"
-        )
-
-    except Exception as e:
-        console.print(
-            f"[bold red]An error occurred during the delta load process: {e}[/bold red]"
-        )
-        if loader and run_id:
-            loader.end_run(run_id, "FAILED", error_log=str(e))
-        raise typer.Exit(1)
+    """F008.3: Perform an incremental (delta) load. (Not Implemented)"""
+    console.print("[bold yellow]Delta load is not yet implemented.[/bold yellow]")
 
 
 if __name__ == "__main__":

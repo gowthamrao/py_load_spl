@@ -61,15 +61,23 @@ class CsvWriterManager:
 
     def write_row(self, model_instance: BaseModel) -> None:
         """Writes a Pydantic model instance to the corresponding CSV file."""
+        import json
+        from .models import SplRawDocument
+
         filename = MODEL_TO_FILENAME_MAP.get(type(model_instance))
         if not filename:
             raise TypeError(f"No CSV mapping for model type: {type(model_instance)}")
 
         writer = self._csv_writers[filename]
+
+        dumped = model_instance.model_dump()
+
+        # Special handling for the raw_data field to ensure it's a valid JSON string literal
+        if isinstance(model_instance, SplRawDocument) and "raw_data" in dumped:
+            dumped["raw_data"] = json.dumps(dumped["raw_data"])
+
         # Convert Pydantic model to a list of values, replacing None with \N for Postgres COPY
-        row = [
-            "\\N" if v is None else v for v in model_instance.model_dump().values()
-        ]
+        row = ["\\N" if v is None else v for v in dumped.values()]
         writer.writerow(row)
 
 

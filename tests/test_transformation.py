@@ -85,7 +85,7 @@ def test_transformer_creates_correct_csvs(tmp_path: Path) -> None:
         assert len(rows) == 1
         raw_doc_row = rows[0]
         assert raw_doc_row[0] == "d1b64b62-050a-4895-924c-d2862d2a6a69"
-        assert raw_doc_row[4] == "<xml>some fake raw data</xml>"
+        assert raw_doc_row[4] == '"<xml>some fake raw data</xml>"'
         assert raw_doc_row[5] == "sample.xml"
 
     # Verify the content of product_ndcs.csv
