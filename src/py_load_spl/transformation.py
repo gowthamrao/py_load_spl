@@ -97,9 +97,9 @@ class CsvWriter(FileWriter):
         writer = self._csv_writers[filename]
         dumped = model_instance.model_dump()
 
-        # Bug Fix: Restore special handling for raw_data to be a valid JSON string
-        if isinstance(model_instance, SplRawDocument) and "raw_data" in dumped:
-            dumped["raw_data"] = json.dumps(dumped["raw_data"])
+        # The raw_data field in SplRawDocument is already a string.
+        # The parser is responsible for converting the XML content to a string.
+        # No extra JSON dumping is needed here.
 
         row = ["\\N" if v is None else v for v in dumped.values()]
         writer.writerow(row)
@@ -142,7 +142,11 @@ class ParquetWriter(FileWriter):
         if not file_base_name:
             raise TypeError(f"No Parquet mapping for model type: {model_type}")
 
-        self._batches[file_base_name].append(model_instance.model_dump())
+        dumped = model_instance.model_dump()
+
+        # The raw_data field in SplRawDocument is already a string.
+        # No extra JSON dumping is needed. It is handled by the model.
+        self._batches[file_base_name].append(dumped)
         self.stats[f"{file_base_name}.parquet"] += 1
 
 
