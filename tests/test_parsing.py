@@ -45,8 +45,17 @@ def sample_spl_file(tmp_path: Path) -> Path:
         <section ID="s2">
           <code code="51945-4" displayName="PACKAGE LABEL.PRINCIPAL DISPLAY PANEL" />
           <text>
-            NDC 12345-678-90
+            Some text here that the old parser might have used.
           </text>
+          <component>
+            <section>
+                <part>
+                  <code code="12345-678-90" displayName="NDC" />
+                  <name>30 Tablets in 1 Bottle</name>
+                  <formCode code="C43182" displayName="BOTTLE" />
+                </part>
+            </section>
+          </component>
           <subject>
             <marketingAct>
               <statusCode code="active"/>
@@ -94,17 +103,76 @@ def test_parse_spl_file(sample_spl_file: Path):
     assert ingredient["unit_of_measure"] == "mg"
 
     # Assert packaging
-    # TODO: This test is failing in the CI environment for unknown reasons.
-    # The parsing logic appears correct and works with local test data,
-    # but the lxml find/iter methods are not finding the 'part' element
-    # within the test execution context. Commenting out to unblock submission.
-    # assert len(data["packaging"]) == 1
-    # package = data["packaging"][0]
-    # assert package["package_ndc"] == "12345-678-90"
+    assert len(data["packaging"]) == 1
+    package = data["packaging"][0]
+    assert package["package_ndc"] == "12345-678-90"
 
     # Assert marketing status
-    # TODO: Also failing in CI for similar reasons to the packaging test.
-    # assert len(data["marketing_status"]) == 1
-    # status = data["marketing_status"][0]
-    # assert status["marketing_category"] == "active"
-    # assert status["start_date"] == "20250101"
+    assert len(data["marketing_status"]) == 1
+    status = data["marketing_status"][0]
+    assert status["marketing_category"] == "active"
+    assert status["start_date"] == "20250101"
+
+
+@pytest.fixture
+def spl_file_with_multiple_statuses(tmp_path: Path) -> Path:
+    """Creates a temporary SPL XML file with multiple marketing statuses."""
+    spl_content = """<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="urn:hl7-org:v3">
+  <id root="d1b64b62-050a-4895-924c-d2862d2a6a69" />
+  <setId root="a2c3b6f0-a38f-4b48-96eb-3b2b403816a4" />
+  <versionNumber value="1" />
+  <effectiveTime value="20250907" />
+  <component>
+    <structuredBody>
+      <component>
+        <section>
+          <subject>
+            <marketingAct>
+              <statusCode code="completed"/>
+              <effectiveTime>
+                <low value="20240101"/>
+                <high value="20241231"/>
+              </effectiveTime>
+            </marketingAct>
+          </subject>
+          <subject>
+            <marketingAct>
+              <statusCode code="active"/>
+              <effectiveTime>
+                <low value="20250101"/>
+              </effectiveTime>
+            </marketingAct>
+          </subject>
+        </section>
+      </component>
+    </structuredBody>
+  </component>
+</document>
+"""
+    file_path = tmp_path / "multi_status.xml"
+    file_path.write_text(spl_content)
+    return file_path
+
+
+def test_parsing_multiple_marketing_statuses(spl_file_with_multiple_statuses: Path):
+    """
+    Tests that the parser correctly extracts multiple marketing status entries,
+    including those with and without an end date.
+    """
+    parsed_data = parse_spl_file(spl_file_with_multiple_statuses)
+
+    assert "marketing_status" in parsed_data
+    assert isinstance(parsed_data["marketing_status"], list)
+    assert len(parsed_data["marketing_status"]) == 2
+
+    # Sort by start_date for predictable order
+    statuses = sorted(parsed_data["marketing_status"], key=lambda x: x.get("start_date"))
+
+    assert statuses[0]["marketing_category"] == "completed"
+    assert statuses[0]["start_date"] == "20240101"
+    assert statuses[0]["end_date"] == "20241231"
+
+    assert statuses[1]["marketing_category"] == "active"
+    assert statuses[1]["start_date"] == "20250101"
+    assert statuses[1]["end_date"] is None
