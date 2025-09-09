@@ -91,7 +91,7 @@ class MockLoader:
 @pytest.fixture
 def mock_db_loader(monkeypatch: pytest.MonkeyPatch):
     """Fixture to mock the PostgresLoader to avoid real DB connections."""
-    monkeypatch.setattr("py_load_spl.cli.PostgresLoader", MockLoader)
+    monkeypatch.setattr("py_load_spl.main.get_db_loader", lambda settings: MockLoader(settings))
 
 
 # def test_download_command(
@@ -153,10 +153,10 @@ def test_delta_load_no_new_archives(
     mock_loader_instance.end_run = lambda run_id, status, count, error_log: None
 
     monkeypatch.setattr(
-        "py_load_spl.cli.get_db_loader", lambda settings: mock_loader_instance
+        "py_load_spl.main.get_db_loader", lambda settings: mock_loader_instance
     )
     monkeypatch.setattr(
-        "py_load_spl.cli.download_spl_archives", lambda loader: []
+        "py_load_spl.main.download_spl_archives", lambda loader: []
     )  # No new archives
 
     with caplog.at_level(logging.INFO):

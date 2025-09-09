@@ -28,16 +28,14 @@ def dummy_zip_md5(dummy_zip_content):
     return hashlib.md5(dummy_zip_content).hexdigest()
 
 
-@patch("py_load_spl.cli.get_db_loader")
+@patch("py_load_spl.cli.get_db_loader", MagicMock())
 def test_full_load_downloads_when_no_source_is_provided(
-    mock_get_db_loader, requests_mock, dummy_zip_content, dummy_zip_md5
+    requests_mock, dummy_zip_content, dummy_zip_md5
 ):
     """
     Verify that `full-load` without --source triggers the download process.
     """
-    # Mock the database loader to avoid actual DB operations
-    mock_loader = MagicMock()
-    mock_get_db_loader.return_value = mock_loader
+    # The get_db_loader is already mocked by the decorator.
 
     # Mock the FDA source page with the correct checksum
     mock_html_content = f"""
@@ -60,11 +58,11 @@ def test_full_load_downloads_when_no_source_is_provided(
     )
 
     # Mock the core logic function to check if it's called
-    with patch("py_load_spl.cli._run_full_load") as mock_run_full_load:
-        result = runner.invoke(app, ["full-load"], catch_exceptions=False)
+    with patch("py_load_spl.cli.run_full_load") as mock_run_full_load:
+        result = runner.invoke(app, ["--log-format", "text", "full-load"], catch_exceptions=False)
 
         assert result.exit_code == 0
-        assert "Downloading all archives from FDA source" in result.stdout
+        assert "Downloading all archives" in result.stdout
         assert "Extracting 2 archives" in result.stdout
 
         # Verify that the core logic was called
@@ -74,20 +72,17 @@ def test_full_load_downloads_when_no_source_is_provided(
         assert isinstance(call_args[1], Path)
 
 
-@patch("py_load_spl.cli.get_db_loader")
-def test_full_load_uses_source_when_provided(mock_get_db_loader, tmp_path):
+@patch("py_load_spl.cli.get_db_loader", MagicMock())
+def test_full_load_uses_source_when_provided(tmp_path):
     """
     Verify that `full-load` with --source uses the provided path and does not download.
     """
-    mock_loader = MagicMock()
-    mock_get_db_loader.return_value = mock_loader
-
     # Create a dummy XML file in the temp source directory
     source_dir = tmp_path / "xmls"
     source_dir.mkdir()
     (source_dir / "test.xml").write_text("<root></root>")
 
-    with patch("py_load_spl.cli._run_full_load") as mock_run_full_load:
+    with patch("py_load_spl.cli.run_full_load") as mock_run_full_load:
         result = runner.invoke(app, ["full-load", "--source", str(source_dir)])
 
         assert result.exit_code == 0

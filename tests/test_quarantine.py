@@ -75,7 +75,7 @@ def mock_db_and_settings(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     test_settings = Settings(quarantine_path=str(quarantine_dir))
 
     monkeypatch.setattr("py_load_spl.cli.get_settings", lambda: test_settings)
-    monkeypatch.setattr("py_load_spl.cli.PostgresLoader", MockLoader)
+    monkeypatch.setattr("py_load_spl.main.get_db_loader", lambda settings: MockLoader(settings))
     return test_settings
 
 
