@@ -175,9 +175,9 @@ def test_merge_from_staging_delta_load(postgres_loader: PostgresLoader):
         cur.execute(
             """
             INSERT INTO ingredients (document_id, ingredient_name, is_active_ingredient)
-            VALUES (%s, 'Original Ingredient', true);
+                VALUES (%s, 'Original Ingredient', true), (%s, 'Untouched Ingredient', false);
             """,
-            (str(updated_doc_id),),
+                (str(updated_doc_id), str(untouched_doc_id)),
         )
     conn.commit()
 

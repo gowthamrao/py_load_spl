@@ -11,12 +11,14 @@ class DatabaseLoader(ABC):
     """
 
     @abstractmethod
-    def initialize_schema(self) -> None:
+    def initialize_schema(self) -> None:  # pragma: no cover
         """Creates the necessary tables and structures (F008.3)."""
         pass
 
     @abstractmethod
-    def bulk_load_to_staging(self, intermediate_dir: Path) -> None:
+    def bulk_load_to_staging(
+        self, intermediate_dir: Path
+    ) -> None:  # pragma: no cover
         """
         Loads the intermediate files into staging tables using native utilities
         (F006.1, F006.2).
@@ -24,12 +26,16 @@ class DatabaseLoader(ABC):
         pass
 
     @abstractmethod
-    def pre_load_optimization(self, mode: Literal["full-load", "delta-load"]) -> None:
+    def pre_load_optimization(
+        self, mode: Literal["full-load", "delta-load"]
+    ) -> None:  # pragma: no cover
         """Optional: Drop indexes, disable constraints (for full loads)."""
         pass
 
     @abstractmethod
-    def merge_from_staging(self, mode: Literal["full-load", "delta-load"]) -> None:
+    def merge_from_staging(
+        self, mode: Literal["full-load", "delta-load"]
+    ) -> None:  # pragma: no cover
         """
         Atomically merges (UPSERT) or swaps (FULL LOAD) data from staging to
         production tables (F006.3).
@@ -37,12 +43,16 @@ class DatabaseLoader(ABC):
         pass
 
     @abstractmethod
-    def post_load_cleanup(self, mode: Literal["full-load", "delta-load"]) -> None:
+    def post_load_cleanup(
+        self, mode: Literal["full-load", "delta-load"]
+    ) -> None:  # pragma: no cover
         """Optional: Rebuild indexes, enable constraints, vacuum/analyze."""
         pass
 
     @abstractmethod
-    def start_run(self, mode: Literal["full-load", "delta-load"]) -> int:
+    def start_run(
+        self, mode: Literal["full-load", "delta-load"]
+    ) -> int:  # pragma: no cover
         """
         Creates a new entry in the ETL history table for the current run
         and returns a unique run identifier.
@@ -52,7 +62,7 @@ class DatabaseLoader(ABC):
     @abstractmethod
     def end_run(
         self, run_id: int, status: str, records_loaded: int, error_log: str | None
-    ) -> None:
+    ) -> None:  # pragma: no cover
         """
         Updates the ETL history table for the specified run with its final
         status and metrics.
@@ -60,7 +70,7 @@ class DatabaseLoader(ABC):
         pass
 
     @abstractmethod
-    def get_processed_archives(self) -> set[str]:
+    def get_processed_archives(self) -> set[str]:  # pragma: no cover
         """
         Retrieves the set of archive names that have already been
         successfully processed.
@@ -68,7 +78,9 @@ class DatabaseLoader(ABC):
         pass
 
     @abstractmethod
-    def record_processed_archive(self, archive_name: str, checksum: str) -> None:
+    def record_processed_archive(
+        self, archive_name: str, checksum: str
+    ) -> None:  # pragma: no cover
         """
         Records a single archive as successfully processed in the database,
         typically after a successful ETL cycle for that archive.
