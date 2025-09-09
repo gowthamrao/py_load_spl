@@ -79,7 +79,7 @@ def mock_db_loader(monkeypatch: pytest.MonkeyPatch):
             # Return an empty set to simulate no archives being processed yet
             return set()
 
-    monkeypatch.setattr("py_load_spl.acquisition.PostgresLoader", MockLoader)
+    monkeypatch.setattr("py_load_spl.cli.PostgresLoader", MockLoader)
 
 
 def test_download_command(
