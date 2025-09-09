@@ -9,7 +9,7 @@ It provides a complete ETL pipeline to make this critical public health data acc
 - **Efficient ETL Pipeline:** Downloads, parses, transforms, and loads the entire FDA SPL dataset.
 - **Memory-Conscious Parsing:** Uses iterative XML parsing (`lxml.iterparse`) to handle large files with a low, constant memory footprint.
 - **Normalized Relational Schema:** Transforms complex, hierarchical XML into a clean, queryable, and normalized database schema.
-- **Full Data Representation:** Stores the complete, original SPL XML in the database (`TEXT` format in PostgreSQL) for full auditing and data fidelity.
+- **Full Data Representation:** Stores the complete SPL data as a `JSONB` object in the database (converted from the source XML) for full auditing and data fidelity.
 - **High-Performance Loading:** Utilizes native database bulk loading utilities (e.g., `COPY` in PostgreSQL) for maximum throughput.
 - **Delta/Incremental Updates:** Intelligently downloads and processes only new or updated SPL archives, making it efficient to keep your database up-to-date.
 - **Extensible by Design:** Built with an adapter pattern, allowing for the future addition of other database targets like Redshift, BigQuery, or Databricks.
