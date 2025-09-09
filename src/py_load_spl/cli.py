@@ -1,16 +1,18 @@
 import concurrent.futures
 import logging
+import shutil
 import tempfile
+from concurrent.futures import as_completed
 from pathlib import Path
 
 import typer
 from rich.console import Console
 
 from . import __name__ as app_name
-from .config import get_settings
+from .config import Settings, get_settings
 from .db.base import DatabaseLoader
 from .db.postgres import PostgresLoader
-from .parsing import parse_spl_file
+from .parsing import SplParsingError, parse_spl_file
 from .transformation import Transformer
 from .util import setup_logging
 
@@ -41,6 +43,44 @@ def get_db_loader(settings) -> DatabaseLoader:
     else:
         console.print(f"[bold red]Error: Unsupported DB adapter '{settings.db.adapter}'[/bold red]")
         raise typer.Exit(1)
+
+
+def _quarantine_and_parse_in_parallel(
+    xml_files: list[Path], settings: Settings, executor: concurrent.futures.ProcessPoolExecutor
+):
+    """
+    Parses a list of XML files in parallel, quarantining any file that fails.
+
+    Yields successfully parsed data dictionaries.
+    """
+    futures = {executor.submit(parse_spl_file, file): file for file in xml_files}
+    quarantined_count = 0
+
+    for future in as_completed(futures):
+        source_file_path = futures[future]  # Get the path associated with this future
+        try:
+            yield future.result()
+        except Exception as e:  # Catch ANY exception from the parsing process
+            quarantine_dir = Path(settings.quarantine_path)
+            quarantine_dir.mkdir(parents=True, exist_ok=True)
+            target_path = quarantine_dir / source_file_path.name
+
+            # Ensure the source file still exists before trying to move
+            if source_file_path.exists():
+                shutil.move(str(source_file_path), str(target_path))
+                quarantined_count += 1
+                logging.warning(
+                    f"Moved corrupted file {source_file_path.name} to {target_path} due to parsing error: {e}"
+                )
+            else:
+                logging.warning(
+                    f"Could not quarantine {source_file_path.name} as it was already moved or deleted."
+                )
+
+    if quarantined_count > 0:
+        console.print(
+            f"[bold yellow]Quarantined {quarantined_count} file(s).[/bold yellow]"
+        )
 
 
 @app.command()
@@ -90,9 +130,10 @@ def full_load(
             with concurrent.futures.ProcessPoolExecutor(
                 max_workers=settings.max_workers
             ) as executor:
-                parsed_data_stream = executor.map(parse_spl_file, xml_files)
+                parsed_data_stream = _quarantine_and_parse_in_parallel(
+                    xml_files, settings, executor
+                )
                 transformer = Transformer(output_dir=output_dir)
-                # The 'stats' variable will be used in the next step of the plan
                 stats = transformer.transform_stream(parsed_data_stream)
 
             console.print("[green]Parsing and Transformation complete.[/green]")
@@ -164,7 +205,9 @@ def delta_load(ctx: typer.Context) -> None:
             with concurrent.futures.ProcessPoolExecutor(
                 max_workers=settings.max_workers
             ) as executor:
-                parsed_data_stream = executor.map(parse_spl_file, xml_files)
+                parsed_data_stream = _quarantine_and_parse_in_parallel(
+                    xml_files, settings, executor
+                )
                 transformer = Transformer(output_dir=csv_temp_dir)
                 stats = transformer.transform_stream(parsed_data_stream)
             console.print("[green]Parsing and Transformation complete.[/green]")
