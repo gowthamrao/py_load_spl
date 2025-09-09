@@ -34,7 +34,7 @@ def test_parquet_writer_writes_correct_data():
             set_id=uuid4(),
             version_number=2,
             effective_time="20250910",
-            raw_data=json.dumps({"section": {"title": "Warnings", "text": "May cause drowsiness."}}),
+            raw_data="<section><title>Warnings</title><text>May cause drowsiness.</text></section>",
             source_filename="test.zip/test.xml",
         )
 

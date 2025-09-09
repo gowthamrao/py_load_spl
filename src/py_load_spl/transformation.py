@@ -95,11 +95,16 @@ class CsvWriter(FileWriter):
 
         filename = f"{file_base_name}.csv"
         writer = self._csv_writers[filename]
-        dumped = model_instance.model_dump()
 
-        # The raw_data field in SplRawDocument is already a string.
-        # The parser is responsible for converting the XML content to a string.
-        # No extra JSON dumping is needed here.
+        # If the model is SplRawDocument, convert raw_data from XML to JSON string
+        if isinstance(model_instance, SplRawDocument) and model_instance.raw_data:
+            import xmltodict
+            import json
+            xml_string = model_instance.raw_data
+            json_string = json.dumps(xmltodict.parse(xml_string))
+            model_instance.raw_data = json_string
+
+        dumped = model_instance.model_dump()
 
         row = ["\\N" if v is None else v for v in dumped.values()]
         writer.writerow(row)
@@ -142,10 +147,16 @@ class ParquetWriter(FileWriter):
         if not file_base_name:
             raise TypeError(f"No Parquet mapping for model type: {model_type}")
 
+        # If the model is SplRawDocument, convert raw_data from XML to JSON string
+        if isinstance(model_instance, SplRawDocument) and model_instance.raw_data:
+            import xmltodict
+            import json
+            xml_string = model_instance.raw_data
+            json_string = json.dumps(xmltodict.parse(xml_string))
+            model_instance.raw_data = json_string
+
         dumped = model_instance.model_dump()
 
-        # The raw_data field in SplRawDocument is already a string.
-        # No extra JSON dumping is needed. It is handled by the model.
         self._batches[file_base_name].append(dumped)
         self.stats[f"{file_base_name}.parquet"] += 1
 
