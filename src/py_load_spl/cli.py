@@ -98,10 +98,10 @@ def full_load(
             console.print("[green]Parsing and Transformation complete.[/green]")
 
             console.print("[cyan]Step 3: Loading data into database...[/cyan]")
-            loader.pre_load_optimization()
+            loader.pre_load_optimization(mode="full-load")
             loader.bulk_load_to_staging(output_dir)
             loader.merge_from_staging("full-load")
-            loader.post_load_cleanup()
+            loader.post_load_cleanup(mode="full-load")
             console.print("[green]Database loading complete.[/green]")
 
         if run_id:
@@ -171,10 +171,10 @@ def delta_load(ctx: typer.Context) -> None:
 
             # Step 5: Load data into database
             console.print("[cyan]Step 5: Loading data into database...[/cyan]")
-            loader.pre_load_optimization()
+            loader.pre_load_optimization(mode="delta-load")
             loader.bulk_load_to_staging(csv_temp_dir)
             loader.merge_from_staging("delta-load")
-            loader.post_load_cleanup()
+            loader.post_load_cleanup(mode="delta-load")
             console.print("[green]Database loading complete.[/green]")
 
             # Step 6: Record processed archives

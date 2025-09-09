@@ -18,6 +18,11 @@ class DatabaseSettings(BaseSettings):
     password: str = "postgres"
     name: str = "spl_data"
     adapter: str = "postgresql"
+    optimize_full_load: bool = Field(
+        default=True,
+        description="Enable dropping/recreating indexes and FKs during a full load.",
+        env="DB_OPTIMIZE_FULL_LOAD",
+    )
 
 
 class Settings(BaseSettings):
