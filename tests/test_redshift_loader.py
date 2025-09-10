@@ -1,27 +1,27 @@
 import os
+from collections.abc import Generator
 from pathlib import Path
-from typing import Generator
 from unittest.mock import MagicMock
 
 import boto3
+import psycopg2
 import pytest
 from moto import mock_aws
-from testcontainers.postgres import PostgresContainer
-from pytest_mock import MockerFixture
 from mypy_boto3_s3.client import S3Client
+from pytest_mock import MockerFixture
+from testcontainers.postgres import PostgresContainer
 
 from py_load_spl.config import RedshiftSettings, S3Settings
 from py_load_spl.db.redshift import RedshiftLoader
-
-import psycopg2
-
 
 # Mark all tests in this file as integration tests
 pytestmark = pytest.mark.integration
 
 
 @pytest.fixture(autouse=True)
-def patch_redshift_connector(mocker: MockerFixture, postgres_container: PostgresContainer):
+def patch_redshift_connector(
+    mocker: MockerFixture, postgres_container: PostgresContainer
+):
     """
     Patches redshift_connector.connect to use psycopg2.connect instead,
     allowing tests to run against a standard Postgres container. This is a
@@ -132,7 +132,21 @@ def test_redshift_loader_pipeline(
     )
 
     mock_cursor = MagicMock()
-    mocker.patch.object(redshift_loader, "_get_conn", return_value=mocker.MagicMock(__enter__=mocker.MagicMock(return_value=mocker.MagicMock(cursor=mocker.MagicMock(return_value=mocker.MagicMock(__enter__=mocker.MagicMock(return_value=mock_cursor)))))))
+    mocker.patch.object(
+        redshift_loader,
+        "_get_conn",
+        return_value=mocker.MagicMock(
+            __enter__=mocker.MagicMock(
+                return_value=mocker.MagicMock(
+                    cursor=mocker.MagicMock(
+                        return_value=mocker.MagicMock(
+                            __enter__=mocker.MagicMock(return_value=mock_cursor)
+                        )
+                    )
+                )
+            )
+        ),
+    )
 
     redshift_loader.bulk_load_to_staging(intermediate_dir)
 
@@ -146,7 +160,9 @@ def test_redshift_loader_pipeline(
     call_args, _ = mock_cursor.execute.call_args
     sql_command = call_args[0]
     assert "COPY products_staging" in sql_command
-    assert f"FROM 's3://{s3_bucket_name}/{s3_prefix}/products_staging.csv'" in sql_command
+    assert (
+        f"FROM 's3://{s3_bucket_name}/{s3_prefix}/products_staging.csv'" in sql_command
+    )
     assert f"IAM_ROLE '{redshift_loader.settings.iam_role_arn}'" in sql_command
     assert "FORMAT AS CSV" in sql_command
 
@@ -164,17 +180,26 @@ def test_redshift_merge_logic(
 
     with redshift_loader._get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute(f"INSERT INTO spl_raw_documents_staging VALUES ('{doc_id}', '{set_id}', 1, '2025-01-01', '{{\"key\": \"value\"}}', 'file.xml', '2025-01-01');")
-            cur.execute(f"INSERT INTO products_staging VALUES ('{doc_id}', '{set_id}', 1, '2025-01-01', 'Prod', 'Mfg', 'Form', 'Route', false, '2025-01-01');")
+            cur.execute(
+                f"INSERT INTO spl_raw_documents_staging VALUES ('{doc_id}', '{set_id}', 1, '2025-01-01', '{{\"key\": \"value\"}}', 'file.xml', '2025-01-01');"
+            )
+            cur.execute(
+                f"INSERT INTO products_staging VALUES ('{doc_id}', '{set_id}', 1, '2025-01-01', 'Prod', 'Mfg', 'Form', 'Route', false, '2025-01-01');"
+            )
         conn.commit()
 
     redshift_loader.merge_from_staging(mode="full-load")
 
     with redshift_loader._get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT COUNT(*) FROM products WHERE document_id = %s", (doc_id,))
+            cur.execute(
+                "SELECT COUNT(*) FROM products WHERE document_id = %s", (doc_id,)
+            )
             assert cur.fetchone()[0] == 1
-            cur.execute("SELECT COUNT(*) FROM spl_raw_documents WHERE document_id = %s", (doc_id,))
+            cur.execute(
+                "SELECT COUNT(*) FROM spl_raw_documents WHERE document_id = %s",
+                (doc_id,),
+            )
             assert cur.fetchone()[0] == 1
 
             cur.execute("SELECT COUNT(*) FROM products_staging;")

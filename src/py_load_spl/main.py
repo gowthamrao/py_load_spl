@@ -26,9 +26,9 @@ def get_db_loader(settings: Settings) -> DatabaseLoader:
     elif adapter == "sqlite":
         return SqliteLoader(settings.db)
     elif adapter == "redshift":
-        assert isinstance(
-            settings.db, RedshiftSettings
-        ), "DB adapter is 'redshift' but settings are not RedshiftSettings"
+        assert isinstance(settings.db, RedshiftSettings), (
+            "DB adapter is 'redshift' but settings are not RedshiftSettings"
+        )
         return RedshiftLoader(settings.db, settings.s3)
     else:
         # This path should be unreachable due to Pydantic validation
