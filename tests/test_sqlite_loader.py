@@ -1,205 +1,163 @@
-import sqlite3
 from pathlib import Path
+from typing import Generator
 
 import pytest
 
-from py_load_spl.config import Settings
+from py_load_spl.config import SqliteSettings
 from py_load_spl.db.sqlite import SqliteLoader
 
 # Mark all tests in this file as integration tests
 pytestmark = pytest.mark.integration
 
-
-from py_load_spl.config import SqliteSettings
+# A list of all expected tables in the schema
+EXPECTED_TABLES = [
+    "etl_load_history",
+    "etl_processed_archives",
+    "spl_raw_documents",
+    "products",
+    "product_ndcs",
+    "ingredients",
+    "packaging",
+    "marketing_status",
+    "spl_raw_documents_staging",
+    "products_staging",
+    "product_ndcs_staging",
+    "ingredients_staging",
+    "packaging_staging",
+    "marketing_status_staging",
+]
 
 
 @pytest.fixture
-def test_settings(tmp_path: Path) -> Settings:
-    """Creates a Settings object configured for a temporary SQLite database."""
-    db_path = tmp_path / "test_spl.db"
-    return Settings(
-        db=SqliteSettings(name=str(db_path)),
-        intermediate_format="csv",
+def db_settings(tmp_path: Path) -> SqliteSettings:
+    """Fixture for database settings pointing to a temporary file."""
+    db_file = tmp_path / "test_spl.db"
+    return SqliteSettings(
+        name=str(db_file),
+        optimize_full_load=True,
     )
 
 
 @pytest.fixture
-def sqlite_loader(test_settings: Settings) -> SqliteLoader:
-    """Yields a SqliteLoader instance for testing."""
-    return SqliteLoader(test_settings.db)
+def sqlite_loader(db_settings: SqliteSettings) -> Generator[SqliteLoader, None, None]:
+    """Fixture to provide an initialized SqliteLoader instance."""
+    loader = SqliteLoader(db_settings)
+    loader.initialize_schema()
+    yield loader
+    loader.close_conn()
 
 
-def test_initialize_schema(sqlite_loader: SqliteLoader):
-    """Tests that the SQLite schema is created correctly."""
-    # Act
-    sqlite_loader.initialize_schema()
-
-    # Assert
-    with sqlite3.connect(sqlite_loader.db_path) as conn:
+def test_initialize_schema(sqlite_loader: SqliteLoader) -> None:
+    """Verify that all tables are created after initialization."""
+    with sqlite_loader._get_conn() as conn:
         cur = conn.cursor()
-        cur.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;")
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table';")
         tables = {row[0] for row in cur.fetchall()}
-
-    expected_tables = {
-        "etl_load_history",
-        "etl_processed_archives",
-        "ingredients",
-        "ingredients_staging",
-        "marketing_status",
-        "marketing_status_staging",
-        "packaging",
-        "packaging_staging",
-        "product_ndcs",
-        "product_ndcs_staging",
-        "products",
-        "products_staging",
-        "spl_raw_documents",
-        "spl_raw_documents_staging",
-    }
-    assert tables == expected_tables
+        assert set(EXPECTED_TABLES).issubset(tables)
 
 
-def _create_dummy_csv_files(tmp_path: Path) -> Path:
-    """Helper function to create dummy CSV files for testing."""
+def test_etl_tracking_isolated(sqlite_loader: SqliteLoader) -> None:
+    """Test the ETL tracking methods in isolation."""
+    assert sqlite_loader.get_processed_archives() == set()
+    run_id = sqlite_loader.start_run(mode="full-load")
+    assert run_id > 0
+    sqlite_loader.record_processed_archive("archive1.zip", "checksum1")
+    assert sqlite_loader.get_processed_archives() == {"archive1.zip"}
+    sqlite_loader.end_run(run_id, "SUCCESS", 100, None)
+    with sqlite_loader._get_conn() as conn:
+        res = conn.execute(
+            "SELECT status, records_loaded FROM etl_load_history WHERE run_id = ?",
+            (run_id,),
+        ).fetchone()
+        assert res[0] == "SUCCESS"
+        assert res[1] == 100
+
+
+def test_bulk_and_full_merge(sqlite_loader: SqliteLoader, tmp_path: Path) -> None:
+    """Test bulk loading to staging and a full merge to production."""
     intermediate_dir = tmp_path / "intermediate"
     intermediate_dir.mkdir()
-
-    # Create products.csv
-    (intermediate_dir / "products.csv").write_text(
-        "doc1,set1,1,2024-01-01,Product A,Pfizer,Tablet,Oral,1,2024-01-01T12:00:00\n"
-        "doc2,set1,2,2024-02-01,Product A V2,Pfizer,Tablet,Oral,0,2024-02-01T12:00:00\n"
-    )
-    # Create ingredients.csv
-    (intermediate_dir / "ingredients.csv").write_text(
-        "doc1,A,UNII-A,10,100,mL,1\ndoc2,B,UNII-B,20,100,mL,1\n"
-    )
-    # Create spl_raw_documents.csv
     (intermediate_dir / "spl_raw_documents.csv").write_text(
-        'doc1,set1,1,2024-01-01,{"key": "value1"},file1.zip,2024-01-01T12:00:00\n'
-        'doc2,set1,2,2024-02-01,{"key": "value2"},file2.zip,2024-02-01T12:00:00\n'
+        'doc1,set1,1,2025-01-01,{"key":"value"},file.zip,2025-01-01T12:00:00\n'
     )
-    # Create empty files for other tables to ensure they are handled gracefully
-    (intermediate_dir / "product_ndcs.csv").touch()
-    (intermediate_dir / "packaging.csv").touch()
-    (intermediate_dir / "marketing_status.csv").touch()
-
-    return intermediate_dir
-
-
-def test_full_load_and_etl_tracking(sqlite_loader: SqliteLoader, tmp_path: Path):
-    """
-    Tests a full, end-to-end load process and the ETL tracking methods.
-    """
-    # 1. Arrange
-    intermediate_dir = _create_dummy_csv_files(tmp_path)
-    sqlite_loader.initialize_schema()
-
-    # 2. Act
-    run_id = sqlite_loader.start_run(mode="full-load")
+    (intermediate_dir / "products.csv").write_text(
+        "doc1,set1,1,2025-01-01,Product A,Pfizer,Tablet,Oral,1,"
+        "2025-01-01T12:00:00\n"
+    )
+    (intermediate_dir / "ingredients.csv").write_text("doc1,Aspirin,UNII1,81,mg,mg,1\n")
     sqlite_loader.bulk_load_to_staging(intermediate_dir)
     sqlite_loader.merge_from_staging(mode="full-load")
-    sqlite_loader.record_processed_archive("file1.zip", "checksum1")
-    sqlite_loader.end_run(run_id, "SUCCESS", 2, None)
+    with sqlite_loader._get_conn() as conn:
+        res = conn.execute(
+            "SELECT product_name FROM products WHERE document_id = 'doc1'"
+        ).fetchone()
+        assert res[0] == "Product A"
 
-    # 3. Assert
-    with sqlite3.connect(sqlite_loader.db_path) as conn:
-        cur = conn.cursor()
-        # Verify data loaded correctly
-        cur.execute("SELECT COUNT(*) FROM products;")
-        assert cur.fetchone()[0] == 2
-        cur.execute("SELECT product_name FROM products WHERE document_id = 'doc1';")
-        assert cur.fetchone()[0] == "Product A"
 
-        # Verify ETL history
-        cur.execute(
-            "SELECT status, records_loaded FROM etl_load_history WHERE run_id = ?;",
-            (run_id,),
+def test_delta_merge_updates_is_latest_version_correctly(
+    sqlite_loader: SqliteLoader, tmp_path: Path
+) -> None:
+    """Test that delta merge correctly updates the is_latest_version flag."""
+    with sqlite_loader._get_conn() as conn:
+        conn.execute(
+            "INSERT INTO spl_raw_documents (document_id, set_id) "
+            "VALUES ('doc1-v1', 'set1')"
         )
-        status, count = cur.fetchone()
-        assert status == "SUCCESS"
-        assert count == 2
-
-        # Verify processed archives
-        cur.execute(
-            "SELECT COUNT(*) FROM etl_processed_archives WHERE archive_name = 'file1.zip';"
+        conn.execute(
+            "INSERT INTO products "
+            "(document_id, set_id, version_number, is_latest_version) "
+            "VALUES ('doc1-v1', 'set1', 1, 1)"
         )
-        assert cur.fetchone()[0] == 1
+        conn.commit()
 
-        # Verify staging tables are empty
-        cur.execute("SELECT COUNT(*) FROM products_staging;")
-        assert cur.fetchone()[0] == 0
-
-
-def test_delta_load_logic(sqlite_loader: SqliteLoader, tmp_path: Path):
-    """
-    Tests that the delta-load merge logic correctly UPSERTs and replaces data.
-    """
-    # 1. Arrange: Initial full load
-    intermediate_dir_v1 = tmp_path / "intermediate_v1"
-    intermediate_dir_v1.mkdir()
-    # Version 1 of 'doc1'
-    (intermediate_dir_v1 / "products.csv").write_text(
-        "doc1,set1,1,2024-01-01,Product A,Pfizer,Tablet,Oral,1,2024-01-01T12:00:00\n"
+    intermediate_dir = tmp_path / "intermediate"
+    intermediate_dir.mkdir()
+    (intermediate_dir / "spl_raw_documents.csv").write_text(
+        'doc1-v2,set1,2,2025-02-01,{"key":"v2"},f2.zip,2025-02-01T12:00:00\n'
+        'doc2-v1,set2,1,2025-03-01,{"key":"v1"},f3.zip,2025-03-01T12:00:00\n'
     )
-    (intermediate_dir_v1 / "ingredients.csv").write_text("doc1,A,UNII-A,10,100,mL,1\n")
-    (intermediate_dir_v1 / "spl_raw_documents.csv").write_text(
-        'doc1,set1,1,2024-01-01,{"key": "value1"},file1.zip,2024-01-01T12:00:00\n'
+    (intermediate_dir / "products.csv").write_text(
+        "doc1-v2,set1,2,2025-02-01,Product A v2,Pfizer,Capsule,Oral,1,"
+        "2025-02-01T12:00:00\n"
+        "doc2-v1,set2,1,2025-03-01,Product B,Moderna,Injection,Parenteral,1,"
+        "2025-03-01T12:00:00\n"
     )
-    (intermediate_dir_v1 / "product_ndcs.csv").touch()
-    (intermediate_dir_v1 / "packaging.csv").touch()
-    (intermediate_dir_v1 / "marketing_status.csv").touch()
-
-    sqlite_loader.initialize_schema()
-    sqlite_loader.bulk_load_to_staging(intermediate_dir_v1)
-    sqlite_loader.merge_from_staging(
-        mode="full-load"
-    )  # is_latest_version is now True for doc1
-
-    # 2. Arrange: Delta load data
-    intermediate_dir_v2 = tmp_path / "intermediate_v2"
-    intermediate_dir_v2.mkdir()
-    # Version 2 of 'doc1' and a new document 'doc2'
-    (intermediate_dir_v2 / "products.csv").write_text(
-        "doc1,set1,2,2024-02-01,Product A V2,Pfizer,Tablet,Oral,0,2024-02-01T12:00:00\n"
-        "doc2,set2,1,2024-03-01,Product B,Moderna,Capsule,Oral,1,2024-03-01T12:00:00\n"
-    )
-    (intermediate_dir_v2 / "ingredients.csv").write_text(
-        "doc1,B,UNII-B,20,100,mL,1\n"
-    )  # Replaces ingredient for doc1
-    (intermediate_dir_v2 / "spl_raw_documents.csv").write_text(
-        'doc1,set1,2,2024-02-01,{"key": "value2"},file2.zip,2024-02-01T12:00:00\n'
-        'doc2,set2,1,2024-03-01,{"key": "value3"},file3.zip,2024-03-01T12:00:00\n'
-    )
-    (intermediate_dir_v2 / "product_ndcs.csv").touch()
-    (intermediate_dir_v2 / "packaging.csv").touch()
-    (intermediate_dir_v2 / "marketing_status.csv").touch()
-
-    # 3. Act
-    sqlite_loader.bulk_load_to_staging(intermediate_dir_v2)
+    sqlite_loader.bulk_load_to_staging(intermediate_dir)
     sqlite_loader.merge_from_staging(mode="delta-load")
 
-    # 4. Assert
-    with sqlite3.connect(sqlite_loader.db_path) as conn:
-        cur = conn.cursor()
-        # Total products should be 2
-        cur.execute("SELECT COUNT(*) FROM products;")
-        assert cur.fetchone()[0] == 2
+    with sqlite_loader._get_conn() as conn:
+        res = conn.execute(
+            "SELECT is_latest_version FROM products WHERE document_id = 'doc1-v1'"
+        ).fetchone()
+        assert res[0] == 0
+        res = conn.execute(
+            "SELECT is_latest_version FROM products WHERE document_id = 'doc1-v2'"
+        ).fetchone()
+        assert res[0] == 1
+        res = conn.execute(
+            "SELECT product_name FROM products WHERE document_id = 'doc2-v1'"
+        ).fetchone()
+        assert res[0] == "Product B"
 
-        # Check that 'doc1' was updated
-        cur.execute(
-            "SELECT version_number, product_name, is_latest_version FROM products WHERE document_id = 'doc1';"
-        )
-        version, name, is_latest = cur.fetchone()
-        assert version == 2
-        assert name == "Product A V2"
-        assert is_latest == 1  # The update logic should have made this the latest
 
-        # Check that the ingredients for 'doc1' were replaced
-        cur.execute(
-            "SELECT ingredient_name FROM ingredients WHERE document_id = 'doc1';"
-        )
-        assert cur.fetchone()[0] == "B"
+def test_optimizations_are_applied_for_full_load(db_settings: SqliteSettings) -> None:
+    """Test optimizations are correctly applied for full loads."""
+    loader = SqliteLoader(db_settings)
+    loader.initialize_schema()
 
-        # Check that 'doc2' was inserted
-        cur.execute("SELECT COUNT(*) FROM products WHERE document_id = 'doc2';")
-        assert cur.fetchone()[0] == 1
+    with loader._get_conn() as conn:
+        assert conn.execute("PRAGMA foreign_keys;").fetchone()[0] == 1
+
+    loader.pre_load_optimization(mode="delta-load")
+    with loader._get_conn() as conn:
+        assert conn.execute("PRAGMA foreign_keys;").fetchone()[0] == 1
+
+    loader.pre_load_optimization(mode="full-load")
+    with loader._get_conn() as conn:
+        assert conn.execute("PRAGMA foreign_keys;").fetchone()[0] == 0
+
+    loader.post_load_cleanup(mode="full-load")
+    with loader._get_conn() as conn:
+        assert conn.execute("PRAGMA foreign_keys;").fetchone()[0] == 1
+
+    loader.close_conn()

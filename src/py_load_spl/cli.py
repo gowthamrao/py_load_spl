@@ -1,6 +1,7 @@
 import logging
 import tempfile
 from pathlib import Path
+from typing import Annotated, Literal
 
 import typer
 from rich.console import Console
@@ -35,7 +36,7 @@ def main(
     setup_logging(log_level, log_format)
     settings = get_settings()
     if intermediate_format in ["csv", "parquet"]:
-        settings.intermediate_format = intermediate_format
+        settings.intermediate_format = intermediate_format  # type: ignore
     ctx.obj = settings
     if ctx.invoked_subcommand is None:
         console.print(
@@ -61,14 +62,19 @@ def init(ctx: typer.Context) -> None:
 @app.command()
 def full_load(
     ctx: typer.Context,
-    source: Path | None = typer.Option(
-        None,
-        help="Local path to SPL XML files. If not provided, all archives will be downloaded.",
-        file_okay=False,
-        dir_okay=True,
-        readable=True,
-        resolve_path=True,
-    ),
+    source: Annotated[
+        Path | None,
+        typer.Option(
+            help=(
+                "Local path to SPL XML files. If not provided, all archives will be "
+                "downloaded."
+            ),
+            file_okay=False,
+            dir_okay=True,
+            readable=True,
+            resolve_path=True,
+        ),
+    ] = None,
 ) -> None:
     """Perform a full data load from a local directory or by downloading all archives."""
     settings: Settings = ctx.obj
