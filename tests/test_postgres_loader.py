@@ -1,21 +1,20 @@
 from datetime import date
+from typing import Generator
 from uuid import uuid4
 
 import psycopg2
 import pytest
 from testcontainers.postgres import PostgresContainer
 
+from py_load_spl.config import PostgresSettings
 from py_load_spl.db.postgres import PostgresLoader
 
 # Mark all tests in this file as integration tests
 pytestmark = pytest.mark.integration
 
 
-from py_load_spl.config import PostgresSettings
-
-
 @pytest.fixture(scope="module")
-def postgres_loader() -> PostgresLoader:
+def postgres_loader() -> Generator[PostgresLoader, None, None]:
     """
     Spins up a PostgreSQL container and yields a PostgresLoader instance
     configured to connect to it.
@@ -33,7 +32,7 @@ def postgres_loader() -> PostgresLoader:
         yield loader
 
 
-def test_initialize_schema(postgres_loader: PostgresLoader):
+def test_initialize_schema(postgres_loader: PostgresLoader) -> None:
     """
     FRD N003.4: Test the full schema initialization using a test container.
     """
@@ -48,6 +47,7 @@ def test_initialize_schema(postgres_loader: PostgresLoader):
 
     # 3. Assert
     # Verify that the tables were created by connecting directly
+    assert isinstance(postgres_loader.settings, PostgresSettings)
     settings = postgres_loader.settings
     conn = psycopg2.connect(
         dbname=settings.name,
@@ -89,12 +89,13 @@ def test_initialize_schema(postgres_loader: PostgresLoader):
     print(f"Successfully verified creation of {len(tables)} tables.")
 
 
-def test_get_processed_archives(postgres_loader: PostgresLoader):
+def test_get_processed_archives(postgres_loader: PostgresLoader) -> None:
     """
     Tests that the loader can correctly retrieve the set of processed archive names.
     """
     # 1. Arrange
     postgres_loader.initialize_schema()
+    assert isinstance(postgres_loader.settings, PostgresSettings)
     settings = postgres_loader.settings
     conn = psycopg2.connect(
         dbname=settings.name,
@@ -120,13 +121,14 @@ def test_get_processed_archives(postgres_loader: PostgresLoader):
     assert result == processed_files
 
 
-def test_merge_from_staging_delta_load(postgres_loader: PostgresLoader):
+def test_merge_from_staging_delta_load(postgres_loader: PostgresLoader) -> None:
     """
     Tests that the delta-load merge logic correctly performs UPSERTs
     and replaces child table data.
     """
     # 1. Arrange: Initial State
     postgres_loader.initialize_schema()
+    assert isinstance(postgres_loader.settings, PostgresSettings)
     settings = postgres_loader.settings
     conn = psycopg2.connect(
         dbname=settings.name,
@@ -218,21 +220,27 @@ def test_merge_from_staging_delta_load(postgres_loader: PostgresLoader):
     with conn.cursor() as cur:
         # Check that the total number of products is now 3
         cur.execute("SELECT count(*) FROM products")
-        assert cur.fetchone()[0] == 3
+        count_result = cur.fetchone()
+        assert count_result is not None
+        assert count_result[0] == 3
 
         # Check that the 'untouched' product is still version 1
         cur.execute(
             "SELECT version_number FROM products WHERE document_id = %s",
             (str(untouched_doc_id),),
         )
-        assert cur.fetchone()[0] == 1
+        version_result = cur.fetchone()
+        assert version_result is not None
+        assert version_result[0] == 1
 
         # Check that the 'updated' product is now version 2
         cur.execute(
             "SELECT version_number, product_name FROM products WHERE document_id = %s",
             (str(updated_doc_id),),
         )
-        version, name = cur.fetchone()
+        updated_result = cur.fetchone()
+        assert updated_result is not None
+        version, name = updated_result
         assert version == 2
         assert name == "Updated Product Name"
 
@@ -241,7 +249,9 @@ def test_merge_from_staging_delta_load(postgres_loader: PostgresLoader):
             "SELECT product_name FROM products WHERE document_id = %s",
             (str(new_doc_id),),
         )
-        assert cur.fetchone()[0] == "New Product"
+        new_result = cur.fetchone()
+        assert new_result is not None
+        assert new_result[0] == "New Product"
 
         # Check that the child records for the updated product were replaced
         cur.execute(
@@ -256,11 +266,100 @@ def test_merge_from_staging_delta_load(postgres_loader: PostgresLoader):
             "SELECT count(*) FROM ingredients WHERE document_id = %s",
             (str(untouched_doc_id),),
         )
-        assert cur.fetchone()[0] == 1
+        untouched_ing_result = cur.fetchone()
+        assert untouched_ing_result is not None
+        assert untouched_ing_result[0] == 1
 
         # Check that staging tables are empty
         cur.execute("SELECT count(*) FROM products_staging")
-        assert cur.fetchone()[0] == 0
+        prod_staging_result = cur.fetchone()
+        assert prod_staging_result is not None
+        assert prod_staging_result[0] == 0
         cur.execute("SELECT count(*) FROM ingredients_staging")
-        assert cur.fetchone()[0] == 0
+        ing_staging_result = cur.fetchone()
+        assert ing_staging_result is not None
+        assert ing_staging_result[0] == 0
+    conn.close()
+
+
+def test_merge_from_staging_delta_load_updates_is_latest_version_flag(
+    postgres_loader: PostgresLoader,
+) -> None:
+    """
+    Tests that the delta-load merge logic correctly updates the
+    `is_latest_version` flag on old and new product versions.
+    """
+    # 1. Arrange: Initial State
+    postgres_loader.initialize_schema()
+    assert isinstance(postgres_loader.settings, PostgresSettings)
+    settings = postgres_loader.settings
+    conn = psycopg2.connect(
+        dbname=settings.name,
+        user=settings.user,
+        password=settings.password,
+        host=settings.host,
+        port=settings.port,
+    )
+
+    set_id = uuid4()
+    v1_doc_id = uuid4()
+    v2_doc_id = uuid4()
+
+    with conn.cursor() as cur:
+        # Insert v1 of the product directly into the production tables
+        cur.execute(
+            """
+            INSERT INTO spl_raw_documents (document_id, set_id, version_number, effective_time, raw_data, source_filename)
+            VALUES (%s, %s, 1, %s, '{}', 'file1.xml');
+            """,
+            (str(v1_doc_id), str(set_id), date(2024, 1, 1)),
+        )
+        cur.execute(
+            """
+            INSERT INTO products (document_id, set_id, version_number, effective_time, product_name, is_latest_version)
+            VALUES (%s, %s, 1, %s, 'Aspirin v1', true);
+            """,
+            (str(v1_doc_id), str(set_id), date(2024, 1, 1)),
+        )
+    conn.commit()
+
+    # 2. Arrange: Staging Data
+    with conn.cursor() as cur:
+        # Stage v2 of the same product
+        cur.execute(
+            """
+            INSERT INTO spl_raw_documents_staging (document_id, set_id, version_number, effective_time, raw_data, source_filename)
+            VALUES (%s, %s, 2, %s, '{}', 'file2.xml');
+            """,
+            (str(v2_doc_id), str(set_id), date(2024, 2, 1)),
+        )
+        cur.execute(
+            """
+            INSERT INTO products_staging (document_id, set_id, version_number, effective_time, product_name, is_latest_version)
+            VALUES (%s, %s, 2, %s, 'Aspirin v2', true);
+            """,
+            (str(v2_doc_id), str(set_id), date(2024, 2, 1)),
+        )
+    conn.commit()
+
+    # 3. Act
+    postgres_loader.merge_from_staging(mode="delta-load")
+
+    # 4. Assert
+    with conn.cursor() as cur:
+        # Check v1: is_latest_version should now be false
+        cur.execute(
+            "SELECT is_latest_version FROM products WHERE document_id = %s", (str(v1_doc_id),)
+        )
+        v1_result = cur.fetchone()
+        assert v1_result is not None, "v1 product not found after merge"
+        assert v1_result[0] is False, "Old version (v1) should not be the latest"
+
+        # Check v2: is_latest_version should be true
+        cur.execute(
+            "SELECT is_latest_version FROM products WHERE document_id = %s", (str(v2_doc_id),)
+        )
+        v2_result = cur.fetchone()
+        assert v2_result is not None, "v2 product not found after merge"
+        assert v2_result[0] is True, "New version (v2) should be the latest"
     conn.close()

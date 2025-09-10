@@ -11,7 +11,7 @@ import pyarrow.csv as pa_csv
 import pyarrow.parquet as pq
 from psycopg2.extensions import connection
 
-from ..config import DatabaseSettings
+from ..config import DatabaseSettings, PostgresSettings
 from .base import DatabaseLoader
 
 logger = logging.getLogger(__name__)
@@ -28,6 +28,9 @@ class PostgresLoader(DatabaseLoader):
     """
 
     def __init__(self, db_settings: DatabaseSettings) -> None:
+        assert isinstance(
+            db_settings, PostgresSettings
+        ), "PostgresLoader requires a PostgresSettings object"
         self.settings = db_settings
         self.conn: connection | None = None
         # Store definitions of dropped objects (indexes, FKs) to recreate them later
@@ -470,7 +473,10 @@ class PostgresLoader(DatabaseLoader):
             with self._get_conn() as conn:
                 with conn.cursor() as cur:
                     cur.execute(sql, (mode,))
-                    run_id = cur.fetchone()[0]
+                    result = cur.fetchone()
+                    if result is None:
+                        raise RuntimeError("Failed to get run_id from database.")
+                    run_id: int = result[0]
                 conn.commit()
             logger.info(f"ETL run started with run_id: {run_id}")
             return run_id

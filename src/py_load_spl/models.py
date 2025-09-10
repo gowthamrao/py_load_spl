@@ -1,4 +1,4 @@
-from datetime import UTC, date, datetime
+from datetime import date, datetime, timezone
 from typing import Any
 from uuid import UUID
 
@@ -34,7 +34,7 @@ class Product(BaseModel):
     dosage_form: str | None = Field(default=None)
     route_of_administration: str | None = Field(default=None)
     is_latest_version: bool = Field(default=False)
-    loaded_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    loaded_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     _clean_strings = field_validator(
         "product_name",
@@ -50,7 +50,9 @@ class Product(BaseModel):
         """Parse date from 'YYYYMMDD' string format."""
         if isinstance(v, str):
             return datetime.strptime(v, "%Y%m%d").date()
-        return v
+        if isinstance(v, date) or v is None:
+            return v
+        raise TypeError("Unsupported type for effective_time")
 
 
 class Archive(BaseModel):
@@ -83,7 +85,7 @@ class SplRawDocument(BaseModel):
     effective_time: date
     raw_data: str  # Raw XML/JSON, should not be cleaned
     source_filename: str
-    loaded_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    loaded_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     _clean_source_filename = field_validator("source_filename", mode="before")(
         clean_string
@@ -95,7 +97,9 @@ class SplRawDocument(BaseModel):
         """Parse date from 'YYYYMMDD' string format."""
         if isinstance(v, str):
             return datetime.strptime(v, "%Y%m%d").date()
-        return v
+        if isinstance(v, date) or v is None:
+            return v
+        raise TypeError("Unsupported type for effective_time")
 
 
 class Ingredient(BaseModel):
@@ -147,5 +151,10 @@ class MarketingStatus(BaseModel):
     def parse_date(cls, v: Any) -> date | None:
         """Parse date from 'YYYYMMDD' string format."""
         if isinstance(v, str):
+            # Handle empty strings gracefully, returning None
+            if not v.strip():
+                return None
             return datetime.strptime(v, "%Y%m%d").date()
-        return v
+        if isinstance(v, date) or v is None:
+            return v
+        raise TypeError("Unsupported type for date")

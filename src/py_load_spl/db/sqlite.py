@@ -6,7 +6,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Literal
 
-from ..config import DatabaseSettings
+from ..config import DatabaseSettings, SqliteSettings
 from .base import DatabaseLoader
 
 logger = logging.getLogger(__name__)
@@ -37,6 +37,9 @@ class SqliteLoader(DatabaseLoader):
     """SQLite-specific implementation of the DatabaseLoader."""
 
     def __init__(self, db_settings: DatabaseSettings) -> None:
+        assert isinstance(
+            db_settings, SqliteSettings
+        ), "SqliteLoader requires a SqliteSettings object"
         self.settings = db_settings
         self.db_path = Path(self.settings.name)
         self.conn: sqlite3.Connection | None = None

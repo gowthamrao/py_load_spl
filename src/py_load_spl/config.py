@@ -10,11 +10,11 @@ logger = logging.getLogger(__name__)
 
 # Base class for all database settings
 class BaseDBSettings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="DB_")
+    model_config = SettingsConfigDict(env_prefix="DB_", extra="allow")
     optimize_full_load: bool = Field(
         default=True,
         description="Enable dropping/recreating indexes and FKs during a full load.",
-        env="DB_OPTIMIZE_FULL_LOAD",
+        validation_alias="DB_OPTIMIZE_FULL_LOAD",
     )
 
 
@@ -67,6 +67,7 @@ class S3Settings(BaseSettings):
 class Settings(BaseSettings):
     """Main application settings."""
 
+    model_config = SettingsConfigDict(extra="allow")
     db: DatabaseSettings = Field(default_factory=PostgresSettings)
     s3: S3Settings = Field(default_factory=S3Settings)
     log_level: str = "INFO"
@@ -78,17 +79,17 @@ class Settings(BaseSettings):
     quarantine_path: str = Field(
         default="data/quarantine",
         description="Directory to move corrupted or unparseable XML files.",
-        env="QUARANTINE_PATH",
+        validation_alias="QUARANTINE_PATH",
     )
     max_workers: int | None = Field(
         default_factory=os.cpu_count,
         description="Number of parallel processes for parsing. Defaults to number of CPUs.",
-        env="MAX_WORKERS",
+        validation_alias="MAX_WORKERS",
     )
     intermediate_format: Literal["csv", "parquet"] = Field(
         default="csv",
         description="The file format for intermediate data files.",
-        env="INTERMEDIATE_FORMAT",
+        validation_alias="INTERMEDIATE_FORMAT",
     )
 
 
