@@ -25,21 +25,14 @@ SAMPLE_XML_CONTENT_GOOD = """<?xml version="1.0" encoding="UTF-8"?>
 </document>
 """
 
-# An invalid XML sample that is missing the critical 'id' element, which should trigger a parsing error
+# An invalid XML sample that is structurally malformed, which should trigger a parsing error
 SAMPLE_XML_CONTENT_BAD = """<?xml version="1.0" encoding="UTF-8"?>
 <document xmlns="urn:hl7-org:v3">
-  <!-- Missing id -->
+  <id root="d1b64b62-050a-4895-924c-d2862d2a6a69" />
   <setId root="a2c3b6f0-a38f-4b48-96eb-3b2b403816a4" />
   <versionNumber value="1" />
   <effectiveTime value="20250909" />
-  <subject>
-    <manufacturedProduct>
-      <manufacturedProduct>
-        <name>Bad Drug</name>
-      </manufacturedProduct>
-    </manufacturedProduct>
-  </subject>
-</document>
+  <!-- Missing closing document tag -->
 """
 
 

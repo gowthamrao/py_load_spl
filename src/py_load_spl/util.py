@@ -1,10 +1,12 @@
 import logging
 import sys
+import zipfile
+from pathlib import Path
 
-from pythonjsonlogger import jsonlogger
+from pythonjsonlogger.json import JsonFormatter
 
 
-def setup_logging(log_level: str, log_format: str):
+def setup_logging(log_level: str, log_format: str) -> None:
     """
     Configures the root logger for the application.
     """
@@ -17,8 +19,9 @@ def setup_logging(log_level: str, log_format: str):
 
     handler = logging.StreamHandler(sys.stdout)
 
+    formatter: logging.Formatter
     if log_format.lower() == "json":
-        formatter = jsonlogger.JsonFormatter(
+        formatter = JsonFormatter(
             "%(asctime)s %(name)s %(levelname)s %(message)s"
         )
     else:
@@ -34,12 +37,6 @@ def setup_logging(log_level: str, log_format: str):
     )
 
 
-import zipfile
-from pathlib import Path
-
-logger = logging.getLogger(__name__)
-
-
 def unzip_archive(archive_path: Path, extract_to: Path) -> None:
     """
     Extracts a zip archive to a specified directory.
@@ -48,6 +45,7 @@ def unzip_archive(archive_path: Path, extract_to: Path) -> None:
         archive_path: The path to the zip file.
         extract_to: The directory where contents should be extracted.
     """
+    logger = logging.getLogger(__name__)
     logger.info(f"Extracting '{archive_path.name}' to '{extract_to}'...")
     try:
         with zipfile.ZipFile(archive_path, "r") as zip_ref:
