@@ -89,3 +89,127 @@ def test_bulk_load_staging_file_missing(
         pytest.fail(
             f"bulk_load_to_staging should not have raised an exception for missing files, but raised {e}"
         )
+
+
+# --- Tests for Rollback on Error ---
+
+
+@pytest.fixture
+def loader_with_mock_conn(
+    db_settings: PostgresSettings, monkeypatch
+) -> tuple[PostgresLoader, MagicMock]:
+    """
+    Provides a PostgresLoader instance where the connection is already mocked.
+    This is useful for testing error handling after a connection is established.
+    """
+    mock_conn = MagicMock()
+    # This simulates an already-established connection
+    monkeypatch.setattr(psycopg2, "connect", MagicMock(return_value=mock_conn))
+    loader = PostgresLoader(db_settings)
+    # Manually set the connection object on the loader instance
+    loader.conn = mock_conn
+    return loader, mock_conn
+
+
+@pytest.mark.parametrize(
+    "method_to_test, method_args, patch_target",
+    [
+        (
+            "initialize_schema",
+            [],
+            "py_load_spl.db.postgres.PostgresLoader._get_conn",
+        ),
+        (
+            "record_processed_archive",
+            ["archive.zip", "checksum"],
+            "py_load_spl.db.postgres.PostgresLoader._get_conn",
+        ),
+        (
+            "bulk_load_to_staging",
+            [Path("dummy_path")],
+            "py_load_spl.db.postgres.PostgresLoader._get_conn",
+        ),
+        (
+            "pre_load_optimization",
+            ["full-load"],
+            "py_load_spl.db.postgres.PostgresLoader._get_conn",
+        ),
+        (
+            "merge_from_staging",
+            ["full-load"],
+            "py_load_spl.db.postgres.PostgresLoader._get_conn",
+        ),
+        ("start_run", ["full-load"], "py_load_spl.db.postgres.PostgresLoader._get_conn"),
+        (
+            "end_run",
+            [1, "SUCCESS", 0, None],
+            "py_load_spl.db.postgres.PostgresLoader._get_conn",
+        ),
+    ],
+)
+def test_db_methods_rollback_on_error(
+    loader_with_mock_conn: tuple[PostgresLoader, MagicMock],
+    mocker,
+    method_to_test: str,
+    method_args: list,
+    patch_target: str,
+):
+    """
+    Tests that various database operations correctly call rollback() on failure.
+    This covers the `if self.conn: self.conn.rollback()` lines.
+    """
+    loader, mock_conn = loader_with_mock_conn
+    mock_cursor = MagicMock()
+    mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
+    mock_cursor.execute.side_effect = psycopg2.Error("Simulated DB Error")
+
+    # Spy on the rollback method
+    rollback_spy = mocker.spy(mock_conn, "rollback")
+
+    # Get the actual method from the loader instance
+    func_to_call = getattr(loader, method_to_test)
+
+    # We need to mock the Path.read_text for initialize_schema
+    if method_to_test == "initialize_schema":
+        mocker.patch("pathlib.Path.read_text", return_value="SELECT 1;")
+
+    # We need to mock glob for bulk_load_to_staging
+    if method_to_test == "bulk_load_to_staging":
+        mocker.patch(
+            "pathlib.Path.glob", return_value=[Path("dummy_path/products.csv")]
+        )
+        mocker.patch("builtins.open", mocker.mock_open(read_data="data"))
+        # IMPORTANT: bulk_load uses copy_expert, not execute
+        mock_cursor.copy_expert.side_effect = psycopg2.Error("Simulated DB Error")
+    else:
+        mock_cursor.execute.side_effect = psycopg2.Error("Simulated DB Error")
+
+    with pytest.raises(psycopg2.Error, match="Simulated DB Error"):
+        func_to_call(*method_args)
+
+    # Assert that rollback was called exactly once
+    assert rollback_spy.call_count == 1
+
+
+def test_post_load_cleanup_exception_handling(
+    loader_with_mock_conn: tuple[PostgresLoader, MagicMock], mocker, caplog
+):
+    """
+    Tests that post_load_cleanup correctly logs and re-raises an exception
+    that occurs during the cleanup process.
+    """
+    loader, mock_conn = loader_with_mock_conn
+    loader.settings.optimize_full_load = True
+
+    # Mock the internal call to _recreate_optimizations to fail
+    mocker.patch.object(
+        loader,
+        "_recreate_optimizations",
+        side_effect=psycopg2.Error("Recreation Failed"),
+    )
+
+    with pytest.raises(psycopg2.Error, match="Recreation Failed"):
+        loader.post_load_cleanup(mode="full-load")
+
+    # Check that the error was logged correctly
+    assert "Post-load cleanup failed: Recreation Failed" in caplog.text

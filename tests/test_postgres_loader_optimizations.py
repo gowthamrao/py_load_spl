@@ -151,3 +151,72 @@ def test_optimizations_skipped_if_disabled(db_settings: DatabaseSettings):
     fks_after_drop, indexes_after_drop = get_db_objects(loader)
     assert fks_after_drop == initial_fks
     assert indexes_after_drop == initial_indexes
+
+
+def test_get_and_recreate_optimizable_objects(loader: PostgresLoader):
+    """
+    Directly tests the _get_optimizable_objects, _drop_optimizations,
+    and _recreate_optimizations methods to ensure they are working.
+    This provides direct coverage for these critical internal methods.
+    """
+    loader.initialize_schema()
+
+    # Manually create a new index to ensure we have something unique to find
+    with loader._get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "CREATE INDEX my_special_test_idx ON products (product_name);"
+            )
+        conn.commit()
+
+    _, initial_indexes = get_db_objects(loader)
+    assert "my_special_test_idx" in initial_indexes
+
+    # --- Test _get_optimizable_objects and _drop_optimizations ---
+    with loader._get_conn() as conn:
+        with conn.cursor() as cur:
+            # This is the primary method we want to cover
+            loader._get_optimizable_objects(cur)
+            assert len(loader.dropped_object_definitions) > 0
+            # Check if our specific index definition was captured
+            assert any(
+                "my_special_test_idx" in s for s in loader.dropped_object_definitions
+            )
+
+            # Now drop them
+            loader._drop_optimizations(cur)
+        conn.commit()
+
+    _, indexes_after_drop = get_db_objects(loader)
+    assert "my_special_test_idx" not in indexes_after_drop
+
+    # --- Test _recreate_optimizations ---
+    with loader._get_conn() as conn:
+        with conn.cursor() as cur:
+            loader._recreate_optimizations(cur)
+        conn.commit()
+
+    _, final_indexes = get_db_objects(loader)
+    assert "my_special_test_idx" in final_indexes
+
+
+def test_pre_load_optimization_rollback_on_error(db_settings, mocker):
+    """
+    Covers the error handling block in pre_load_optimization using a mocked connection.
+    """
+    # Arrange: Create a mock connection that we can spy on
+    mock_conn = mocker.MagicMock()
+    mocker.patch("psycopg2.connect", return_value=mock_conn)
+
+    # Arrange: Create a loader and patch its internal method to raise an error
+    loader = PostgresLoader(db_settings)
+    mocker.patch.object(
+        loader, "_get_optimizable_objects", side_effect=psycopg2.Error("Mocked Failure")
+    )
+    rollback_spy = mocker.spy(mock_conn, "rollback")
+
+    # Act & Assert
+    with pytest.raises(psycopg2.Error, match="Mocked Failure"):
+        loader.pre_load_optimization(mode="full-load")
+
+    assert rollback_spy.call_count == 1
