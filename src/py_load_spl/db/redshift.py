@@ -171,16 +171,17 @@ class RedshiftLoader(DatabaseLoader):
                                 # These are child tables, we replace all children for a given document
                                 pk_column = "document_id"
 
-                            # For child tables, we need to delete all existing children for the parent documents we are updating.
-                            if table != "spl_raw_documents" and table != "products":
+                            # For parent tables, we delete all records that are being updated.
+                            # For child tables, we delete all children for the parent documents being updated.
+                            if table == "products" or table == "spl_raw_documents":
                                 cur.execute(f"""
                                     DELETE FROM {table}
-                                    WHERE {pk_column} IN (SELECT document_id FROM products_staging);
+                                    WHERE set_id IN (SELECT DISTINCT set_id FROM {table}_staging);
                                 """)
-                            else:  # For parent tables, we delete the specific records.
+                            else:
                                 cur.execute(f"""
                                     DELETE FROM {table}
-                                    WHERE {pk_column} IN (SELECT {pk_column} FROM {table}_staging);
+                                    WHERE document_id IN (SELECT DISTINCT document_id FROM {table}_staging);
                                 """)
 
                             cur.execute(
@@ -230,7 +231,7 @@ class RedshiftLoader(DatabaseLoader):
             raise
 
     def start_run(self, mode: str) -> int:
-        sql = "INSERT INTO etl_load_history (start_time, status, mode) VALUES (GETDATE(), 'RUNNING', %s);"
+        sql = "INSERT INTO etl_load_history (start_time, status, mode) VALUES (NOW(), 'RUNNING', %s);"
         try:
             with self._get_conn() as conn:
                 with conn.cursor() as cur:
@@ -253,7 +254,7 @@ class RedshiftLoader(DatabaseLoader):
     ) -> None:
         sql = """
             UPDATE etl_load_history
-            SET end_time = GETDATE(), status = %s, records_loaded = %s, error_log = %s
+            SET end_time = NOW(), status = %s, records_loaded = %s, error_log = %s
             WHERE run_id = %s;
         """
         try:
@@ -292,7 +293,7 @@ class RedshiftLoader(DatabaseLoader):
                     cur.execute(
                         """
                         INSERT INTO etl_processed_archives (archive_name, archive_checksum, processed_timestamp)
-                        VALUES (%s, %s, GETDATE());
+                        VALUES (%s, %s, NOW());
                     """,
                         (archive_name, checksum),
                     )
