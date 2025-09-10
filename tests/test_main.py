@@ -40,11 +40,14 @@ def source_xml_dir(tmp_path: Path) -> Path:
     return source_dir
 
 
+from py_load_spl.config import PostgresSettings
+
+
 @pytest.fixture
-def db_settings(monkeypatch: pytest.MonkeyPatch):
+def db_settings(monkeypatch: pytest.MonkeyPatch) -> PostgresSettings:
     """Spins up a PostgreSQL container and returns the connection settings."""
     with PostgresContainer("postgres:16-alpine") as postgres:
-        settings = DatabaseSettings(
+        settings = PostgresSettings(
             host=postgres.get_container_host_ip(),
             port=postgres.get_exposed_port(5432),
             user=postgres.username,
@@ -54,6 +57,7 @@ def db_settings(monkeypatch: pytest.MonkeyPatch):
         )
         # Initialize the schema
         from py_load_spl.db.postgres import PostgresLoader
+
         loader = PostgresLoader(settings)
         loader.initialize_schema()
 
@@ -74,7 +78,7 @@ def test_run_full_load_integration(db_settings: DatabaseSettings, source_xml_dir
     conn_kwargs = db_settings.model_dump()
     conn_kwargs["dbname"] = conn_kwargs.pop("name")
     conn_kwargs.pop("adapter")
-    conn_kwargs.pop("optimize_full_load", None) # Optional field
+    conn_kwargs.pop("optimize_full_load", None)  # Optional field
     conn = psycopg2.connect(**conn_kwargs)
     with conn.cursor() as cur:
         cur.execute("SELECT product_name, manufacturer_name FROM products")
@@ -83,6 +87,7 @@ def test_run_full_load_integration(db_settings: DatabaseSettings, source_xml_dir
         assert product[0] == "Main Test Drug"
         assert product[1] == "Main Test Corp"
     conn.close()
+
 
 # A simplified HTML fixture mimicking the structure of the DailyMed page
 HTML_FIXTURE = """
@@ -96,7 +101,9 @@ HTML_FIXTURE = """
 
 @pytest.mark.integration
 @patch("py_load_spl.acquisition.get_archive_list")
-def test_run_delta_load_integration(mock_get_archive_list, db_settings: DatabaseSettings, tmp_path: Path):
+def test_run_delta_load_integration(
+    mock_get_archive_list, db_settings: DatabaseSettings, tmp_path: Path
+):
     """
     Tests the run_delta_load function directly, mocking the download part.
     """
@@ -104,7 +111,9 @@ def test_run_delta_load_integration(mock_get_archive_list, db_settings: Database
     archive_name = "dm_spl_daily_update_09102025.zip"
     zip_file_path = tmp_path / archive_name
     with zipfile.ZipFile(zip_file_path, "w") as zf:
-        zf.writestr("delta_test.xml", SAMPLE_XML_CONTENT.replace("Main Test Drug", "Delta Drug"))
+        zf.writestr(
+            "delta_test.xml", SAMPLE_XML_CONTENT.replace("Main Test Drug", "Delta Drug")
+        )
 
     mock_content = zip_file_path.read_bytes()
     mock_checksum = hashlib.md5(mock_content).hexdigest()
@@ -114,8 +123,13 @@ def test_run_delta_load_integration(mock_get_archive_list, db_settings: Database
 
     # 3. Mock the functions that perform network calls
     from py_load_spl.models import Archive
+
     mock_get_archive_list.return_value = [
-        Archive(name=archive_name, url=f"https://example.com/{archive_name}", checksum=mock_checksum)
+        Archive(
+            name=archive_name,
+            url=f"https://example.com/{archive_name}",
+            checksum=mock_checksum,
+        )
     ]
 
     # We also need to patch download_archive to use our local file instead of downloading
@@ -130,11 +144,16 @@ def test_run_delta_load_integration(mock_get_archive_list, db_settings: Database
     conn_kwargs.pop("optimize_full_load", None)
     conn = psycopg2.connect(**conn_kwargs)
     with conn.cursor() as cur:
-        cur.execute("SELECT product_name FROM products WHERE product_name = 'Delta Drug'")
+        cur.execute(
+            "SELECT product_name FROM products WHERE product_name = 'Delta Drug'"
+        )
         product = cur.fetchone()
         assert product is not None
 
-        cur.execute("SELECT COUNT(*) FROM etl_processed_archives WHERE archive_name = %s", (archive_name,))
+        cur.execute(
+            "SELECT COUNT(*) FROM etl_processed_archives WHERE archive_name = %s",
+            (archive_name,),
+        )
         count = cur.fetchone()[0]
         assert count == 1
     conn.close()

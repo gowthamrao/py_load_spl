@@ -1,6 +1,9 @@
-import pytest
 from pathlib import Path
-from py_load_spl.parsing import parse_spl_file, SplParsingError
+
+import pytest
+
+from py_load_spl.parsing import SplParsingError, parse_spl_file
+
 
 def test_parsing_handles_attribute_error(tmp_path: Path):
     """

@@ -12,6 +12,9 @@ from py_load_spl.db.postgres import PostgresLoader
 pytestmark = pytest.mark.integration
 
 
+from py_load_spl.config import PostgresSettings
+
+
 @pytest.fixture(scope="module")
 def postgres_loader() -> PostgresLoader:
     """
@@ -19,7 +22,7 @@ def postgres_loader() -> PostgresLoader:
     configured to connect to it.
     """
     with PostgresContainer("postgres:16-alpine") as postgres:
-        db_settings = DatabaseSettings(
+        db_settings = PostgresSettings(
             host=postgres.get_container_host_ip(),
             port=postgres.get_exposed_port(5432),
             user=postgres.username,
@@ -177,7 +180,7 @@ def test_merge_from_staging_delta_load(postgres_loader: PostgresLoader):
             INSERT INTO ingredients (document_id, ingredient_name, is_active_ingredient)
                 VALUES (%s, 'Original Ingredient', true), (%s, 'Untouched Ingredient', false);
             """,
-                (str(updated_doc_id), str(untouched_doc_id)),
+            (str(updated_doc_id), str(untouched_doc_id)),
         )
     conn.commit()
 

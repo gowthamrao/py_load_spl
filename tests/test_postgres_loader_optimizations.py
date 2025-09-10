@@ -16,10 +16,13 @@ def postgres_container():
         yield postgres
 
 
+from py_load_spl.config import PostgresSettings
+
+
 @pytest.fixture
-def db_settings(postgres_container: PostgresContainer) -> DatabaseSettings:
+def db_settings(postgres_container: PostgresContainer) -> PostgresSettings:
     """Returns a fresh DatabaseSettings instance for each test."""
-    return DatabaseSettings(
+    return PostgresSettings(
         host=postgres_container.get_container_host_ip(),
         port=postgres_container.get_exposed_port(5432),
         user=postgres_container.username,

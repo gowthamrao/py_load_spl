@@ -1,16 +1,16 @@
-import csv
 import sqlite3
 from pathlib import Path
-from uuid import uuid4
 
 import pytest
 
 from py_load_spl.config import DatabaseSettings, Settings
 from py_load_spl.db.sqlite import SqliteLoader
-from py_load_spl.main import run_full_load
 
 # Mark all tests in this file as integration tests
 pytestmark = pytest.mark.integration
+
+
+from py_load_spl.config import SqliteSettings
 
 
 @pytest.fixture
@@ -18,7 +18,7 @@ def test_settings(tmp_path: Path) -> Settings:
     """Creates a Settings object configured for a temporary SQLite database."""
     db_path = tmp_path / "test_spl.db"
     return Settings(
-        db=DatabaseSettings(adapter="sqlite", name=str(db_path)),
+        db=SqliteSettings(name=str(db_path)),
         intermediate_format="csv",
     )
 
@@ -71,8 +71,7 @@ def _create_dummy_csv_files(tmp_path: Path) -> Path:
     )
     # Create ingredients.csv
     (intermediate_dir / "ingredients.csv").write_text(
-        'doc1,A,UNII-A,10,100,mL,1\n'
-        'doc2,B,UNII-B,20,100,mL,1\n'
+        "doc1,A,UNII-A,10,100,mL,1\ndoc2,B,UNII-B,20,100,mL,1\n"
     )
     # Create spl_raw_documents.csv
     (intermediate_dir / "spl_raw_documents.csv").write_text(
@@ -83,7 +82,6 @@ def _create_dummy_csv_files(tmp_path: Path) -> Path:
     (intermediate_dir / "product_ndcs.csv").touch()
     (intermediate_dir / "packaging.csv").touch()
     (intermediate_dir / "marketing_status.csv").touch()
-
 
     return intermediate_dir
 
@@ -113,13 +111,18 @@ def test_full_load_and_etl_tracking(sqlite_loader: SqliteLoader, tmp_path: Path)
         assert cur.fetchone()[0] == "Product A"
 
         # Verify ETL history
-        cur.execute("SELECT status, records_loaded FROM etl_load_history WHERE run_id = ?;", (run_id,))
+        cur.execute(
+            "SELECT status, records_loaded FROM etl_load_history WHERE run_id = ?;",
+            (run_id,),
+        )
         status, count = cur.fetchone()
         assert status == "SUCCESS"
         assert count == 2
 
         # Verify processed archives
-        cur.execute("SELECT COUNT(*) FROM etl_processed_archives WHERE archive_name = 'file1.zip';")
+        cur.execute(
+            "SELECT COUNT(*) FROM etl_processed_archives WHERE archive_name = 'file1.zip';"
+        )
         assert cur.fetchone()[0] == 1
 
         # Verify staging tables are empty
@@ -148,7 +151,9 @@ def test_delta_load_logic(sqlite_loader: SqliteLoader, tmp_path: Path):
 
     sqlite_loader.initialize_schema()
     sqlite_loader.bulk_load_to_staging(intermediate_dir_v1)
-    sqlite_loader.merge_from_staging(mode="full-load") # is_latest_version is now True for doc1
+    sqlite_loader.merge_from_staging(
+        mode="full-load"
+    )  # is_latest_version is now True for doc1
 
     # 2. Arrange: Delta load data
     intermediate_dir_v2 = tmp_path / "intermediate_v2"
@@ -158,7 +163,9 @@ def test_delta_load_logic(sqlite_loader: SqliteLoader, tmp_path: Path):
         "doc1,set1,2,2024-02-01,Product A V2,Pfizer,Tablet,Oral,0,2024-02-01T12:00:00\n"
         "doc2,set2,1,2024-03-01,Product B,Moderna,Capsule,Oral,1,2024-03-01T12:00:00\n"
     )
-    (intermediate_dir_v2 / "ingredients.csv").write_text("doc1,B,UNII-B,20,100,mL,1\n") # Replaces ingredient for doc1
+    (intermediate_dir_v2 / "ingredients.csv").write_text(
+        "doc1,B,UNII-B,20,100,mL,1\n"
+    )  # Replaces ingredient for doc1
     (intermediate_dir_v2 / "spl_raw_documents.csv").write_text(
         'doc1,set1,2,2024-02-01,{"key": "value2"},file2.zip,2024-02-01T12:00:00\n'
         'doc2,set2,1,2024-03-01,{"key": "value3"},file3.zip,2024-03-01T12:00:00\n'
@@ -166,7 +173,6 @@ def test_delta_load_logic(sqlite_loader: SqliteLoader, tmp_path: Path):
     (intermediate_dir_v2 / "product_ndcs.csv").touch()
     (intermediate_dir_v2 / "packaging.csv").touch()
     (intermediate_dir_v2 / "marketing_status.csv").touch()
-
 
     # 3. Act
     sqlite_loader.bulk_load_to_staging(intermediate_dir_v2)
@@ -180,14 +186,18 @@ def test_delta_load_logic(sqlite_loader: SqliteLoader, tmp_path: Path):
         assert cur.fetchone()[0] == 2
 
         # Check that 'doc1' was updated
-        cur.execute("SELECT version_number, product_name, is_latest_version FROM products WHERE document_id = 'doc1';")
+        cur.execute(
+            "SELECT version_number, product_name, is_latest_version FROM products WHERE document_id = 'doc1';"
+        )
         version, name, is_latest = cur.fetchone()
         assert version == 2
         assert name == "Product A V2"
-        assert is_latest == 1 # The update logic should have made this the latest
+        assert is_latest == 1  # The update logic should have made this the latest
 
         # Check that the ingredients for 'doc1' were replaced
-        cur.execute("SELECT ingredient_name FROM ingredients WHERE document_id = 'doc1';")
+        cur.execute(
+            "SELECT ingredient_name FROM ingredients WHERE document_id = 'doc1';"
+        )
         assert cur.fetchone()[0] == "B"
 
         # Check that 'doc2' was inserted

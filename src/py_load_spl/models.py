@@ -4,8 +4,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
 
-
 # --- Reusable Validators (F003.3) ---
+
 
 def clean_string(v: str | None) -> str | None:
     """

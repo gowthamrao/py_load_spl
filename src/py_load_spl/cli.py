@@ -76,23 +76,34 @@ def full_load(
     try:
         if source:
             if not source.exists():
-                console.print(f"[bold red]Error: Source path '{source}' does not exist.[/bold red]")
+                console.print(
+                    f"[bold red]Error: Source path '{source}' does not exist.[/bold red]"
+                )
                 raise typer.Exit(1)
             run_full_load(settings, source)
         else:
-            console.print("[bold cyan]Step 0: No source path provided. Downloading all archives...[/bold cyan]")
-            with tempfile.TemporaryDirectory() as download_dir, tempfile.TemporaryDirectory() as xml_dir:
+            console.print(
+                "[bold cyan]Step 0: No source path provided. Downloading all archives...[/bold cyan]"
+            )
+            with (
+                tempfile.TemporaryDirectory() as download_dir,
+                tempfile.TemporaryDirectory() as xml_dir,
+            ):
                 # Temporarily override download_path so archives go into our temp dir
                 original_download_path = settings.download_path
                 settings.download_path = download_dir
                 try:
                     downloaded_archives = download_all_archives(settings)
                     if not downloaded_archives:
-                        console.print("[bold yellow]No archives were downloaded. Nothing to do.[/bold yellow]")
+                        console.print(
+                            "[bold yellow]No archives were downloaded. Nothing to do.[/bold yellow]"
+                        )
                         return
 
                     xml_dir_path = Path(xml_dir)
-                    console.print(f"[cyan]Extracting {len(downloaded_archives)} archives to {xml_dir_path}...[/cyan]")
+                    console.print(
+                        f"[cyan]Extracting {len(downloaded_archives)} archives to {xml_dir_path}...[/cyan]"
+                    )
                     for archive in downloaded_archives:
                         archive_path = Path(settings.download_path) / archive.name
                         unzip_archive(archive_path, xml_dir_path)
@@ -100,9 +111,13 @@ def full_load(
                     run_full_load(settings, xml_dir_path)
                 finally:
                     settings.download_path = original_download_path
-        console.print("[bold green]Full load process finished successfully.[/bold green]")
+        console.print(
+            "[bold green]Full load process finished successfully.[/bold green]"
+        )
     except Exception as e:
-        console.print(f"[bold red]An error occurred during the full load process: {e}[/bold red]")
+        console.print(
+            f"[bold red]An error occurred during the full load process: {e}[/bold red]"
+        )
         raise typer.Exit(1) from e
 
 
@@ -113,9 +128,13 @@ def delta_load(ctx: typer.Context) -> None:
     console.print("[bold cyan]Starting delta data load from FDA source...[/bold cyan]")
     try:
         run_delta_load(settings)
-        console.print("[bold green]Delta load process finished successfully.[/bold green]")
+        console.print(
+            "[bold green]Delta load process finished successfully.[/bold green]"
+        )
     except Exception as e:
-        console.print(f"[bold red]An error occurred during the delta load process: {e}[/bold red]")
+        console.print(
+            f"[bold red]An error occurred during the delta load process: {e}[/bold red]"
+        )
         raise typer.Exit(1) from e
 
 
