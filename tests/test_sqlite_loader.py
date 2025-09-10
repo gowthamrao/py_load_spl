@@ -1,5 +1,5 @@
+from collections.abc import Generator
 from pathlib import Path
-from typing import Generator
 
 import pytest
 
@@ -81,8 +81,7 @@ def test_bulk_and_full_merge(sqlite_loader: SqliteLoader, tmp_path: Path) -> Non
         'doc1,set1,1,2025-01-01,{"key":"value"},file.zip,2025-01-01T12:00:00\n'
     )
     (intermediate_dir / "products.csv").write_text(
-        "doc1,set1,1,2025-01-01,Product A,Pfizer,Tablet,Oral,1,"
-        "2025-01-01T12:00:00\n"
+        "doc1,set1,1,2025-01-01,Product A,Pfizer,Tablet,Oral,1,2025-01-01T12:00:00\n"
     )
     (intermediate_dir / "ingredients.csv").write_text("doc1,Aspirin,UNII1,81,mg,mg,1\n")
     sqlite_loader.bulk_load_to_staging(intermediate_dir)

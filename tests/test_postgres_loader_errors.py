@@ -139,7 +139,11 @@ def loader_with_mock_conn(
             ["full-load"],
             "py_load_spl.db.postgres.PostgresLoader._get_conn",
         ),
-        ("start_run", ["full-load"], "py_load_spl.db.postgres.PostgresLoader._get_conn"),
+        (
+            "start_run",
+            ["full-load"],
+            "py_load_spl.db.postgres.PostgresLoader._get_conn",
+        ),
         (
             "end_run",
             [1, "SUCCESS", 0, None],

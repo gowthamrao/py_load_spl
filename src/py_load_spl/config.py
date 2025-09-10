@@ -42,8 +42,16 @@ class RedshiftSettings(BaseDBSettings):
     iam_role_arn: str
 
 
+class DatabricksSettings(BaseDBSettings):
+    adapter: Literal["databricks"] = "databricks"
+    server_hostname: str
+    http_path: str
+    token: str
+    s3_staging_path: str  # e.g. s3://my-bucket/staging
+
+
 DatabaseSettings = Annotated[
-    PostgresSettings | SqliteSettings | RedshiftSettings,
+    PostgresSettings | SqliteSettings | RedshiftSettings | DatabricksSettings,
     Field(discriminator="adapter"),
 ]
 
