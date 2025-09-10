@@ -80,11 +80,19 @@ pdm run py-load-spl init
 
 ### 2. Perform a Full Load
 
-A full load is used to populate the database from a local directory of unzipped SPL XML files. This is typically done the first time you set up the database.
+A full load populates the database with the entire FDA SPL dataset. This is typically done the first time you set up the database. The command can operate in two modes:
 
-First, download the SPL archives from the [FDA DailyMed site](https://dailymed.nlm.nih.gov/dailymed/spl-resources-all-drug-labels.cfm) and unzip them into a single directory.
+**Mode 1: Automatic Download (Recommended)**
 
-Then, run the `full-load` command:
+If you run the command without any arguments, it will automatically download all SPL archives from the FDA source, unzip them, and process them. This is the easiest way to perform a full load.
+
+```bash
+pdm run py-load-spl full-load
+```
+
+**Mode 2: From a Local Directory**
+
+If you have already downloaded and unzipped the SPL archives, you can point the tool to the directory containing the XML files using the `--source` option.
 
 ```bash
 pdm run py-load-spl full-load --source /path/to/unzipped/xml/files
