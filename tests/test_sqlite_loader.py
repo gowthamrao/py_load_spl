@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from py_load_spl.config import DatabaseSettings, Settings
+from py_load_spl.config import Settings
 from py_load_spl.db.sqlite import SqliteLoader
 
 # Mark all tests in this file as integration tests

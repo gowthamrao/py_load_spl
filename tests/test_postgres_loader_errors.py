@@ -4,11 +4,8 @@ from unittest.mock import MagicMock
 import psycopg2
 import pytest
 
-from py_load_spl.config import DatabaseSettings
+from py_load_spl.config import DatabaseSettings, PostgresSettings
 from py_load_spl.db.postgres import PostgresLoader
-
-
-from py_load_spl.config import PostgresSettings
 
 
 @pytest.fixture

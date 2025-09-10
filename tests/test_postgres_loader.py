@@ -5,7 +5,6 @@ import psycopg2
 import pytest
 from testcontainers.postgres import PostgresContainer
 
-from py_load_spl.config import DatabaseSettings
 from py_load_spl.db.postgres import PostgresLoader
 
 # Mark all tests in this file as integration tests

@@ -13,6 +13,13 @@ from rich.progress import (
     TimeRemainingColumn,
     TransferSpeedColumn,
 )
+from tenacity import (
+    before_sleep_log,
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 from .config import Settings, get_settings
 from .db.base import DatabaseLoader
@@ -21,17 +28,22 @@ from .models import Archive
 logger = logging.getLogger(__name__)
 
 
+@retry(
+    retry=retry_if_exception_type(requests.RequestException),
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    stop=stop_after_attempt(3),
+    before_sleep=before_sleep_log(logger, logging.WARNING),
+)
 def get_archive_list(settings: Settings) -> list[Archive]:
     """
     Scrapes the DailyMed SPL download page to get a list of all available archives.
+    This function is decorated to be resilient to transient network errors.
     """
     logger.info("Fetching archive list from %s", settings.fda_source_url)
-    try:
-        response = requests.get(str(settings.fda_source_url), timeout=60)
-        response.raise_for_status()
-    except requests.RequestException as e:
-        logger.error("Failed to fetch archive list: %s", e)
-        raise
+    # The try/except block is removed as tenacity will handle the exception
+    # and raise a RetryError if all attempts fail.
+    response = requests.get(str(settings.fda_source_url), timeout=60)
+    response.raise_for_status()
 
     soup = BeautifulSoup(response.content, "lxml")
     archives: list[Archive] = []
@@ -43,7 +55,7 @@ def get_archive_list(settings: Settings) -> list[Archive]:
         if not https_link:
             continue
 
-        href = https_link.get("href")
+        href = https_link.get("href")  # type: ignore[attr-defined]
         if not href or not href.endswith(".zip"):
             continue
 
@@ -68,9 +80,17 @@ def get_archive_list(settings: Settings) -> list[Archive]:
     return archives
 
 
+@retry(
+    retry=retry_if_exception_type(requests.RequestException),
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    stop=stop_after_attempt(3),
+    before_sleep=before_sleep_log(logger, logging.WARNING),
+)
 def download_archive(archive: Archive, settings: Settings) -> Path:
     """
     Downloads a single archive file, verifies its checksum, and saves it.
+
+    This function is decorated to be resilient to transient network errors.
     """
     download_dir = Path(settings.download_path)
     download_dir.mkdir(parents=True, exist_ok=True)
@@ -91,9 +111,11 @@ def download_archive(archive: Archive, settings: Settings) -> Path:
     )
 
     md5 = hashlib.md5()
+    # Tenacity will handle retrying on requests.RequestException.
+    # We still need to handle other potential errors, like checksum mismatches.
     try:
         with requests.get(archive.url, stream=True, timeout=300) as r:
-            r.raise_for_status()
+            r.raise_for_status()  # Let tenacity catch this if it's a network error
             total_size = int(r.headers.get("content-length", 0))
             task_id = progress.add_task(
                 "download", total=total_size, filename=archive.name
@@ -106,16 +128,24 @@ def download_archive(archive: Archive, settings: Settings) -> Path:
 
         calculated_checksum = md5.hexdigest()
         if calculated_checksum.lower() != archive.checksum.lower():
-            file_path.unlink()  # Delete corrupted file
-            raise ValueError(
+            msg = (
                 f"Checksum mismatch for {archive.name}. "
                 f"Expected {archive.checksum}, got {calculated_checksum}."
             )
+            raise ValueError(msg)
         logger.info("Checksum verified for %s", archive.name)
         return file_path
-    except (requests.RequestException, ValueError) as e:
-        logger.error("Failed to download or verify %s: %s", archive.name, e)
-        # Clean up partial download if it exists
+    except ValueError as e:
+        # This will catch the checksum error specifically. We don't want to retry this.
+        logger.error("Data integrity error for %s: %s", archive.name, e)
+        if file_path.exists():
+            file_path.unlink()  # Delete corrupted file
+        raise  # Re-raise the ValueError
+    except Exception as e:
+        # Catch any other unexpected errors during file handling
+        logger.error(
+            "An unexpected error occurred during download of %s: %s", archive.name, e
+        )
         if file_path.exists():
             file_path.unlink(missing_ok=True)
         raise
