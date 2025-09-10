@@ -1,4 +1,5 @@
 import os
+import uuid
 from collections.abc import Generator
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -6,6 +7,7 @@ from unittest.mock import MagicMock
 import boto3
 import psycopg2
 import pytest
+import redshift_connector
 from moto import mock_aws
 from mypy_boto3_s3.client import S3Client
 from pytest_mock import MockerFixture
@@ -205,3 +207,194 @@ def test_redshift_merge_logic(
             cur.execute("SELECT COUNT(*) FROM products_staging;")
             assert cur.fetchone()[0] == 0
         conn.commit()
+
+
+def test_redshift_merge_delta_load(
+    redshift_loader: RedshiftLoader, mocker: MockerFixture
+) -> None:
+    """Tests the delta-load logic for the merge operation."""
+    test_schema_path = Path(__file__).parent / "redshift_schema_for_test.sql"
+    mocker.patch("py_load_spl.db.redshift.SQL_SCHEMA_PATH", test_schema_path)
+    redshift_loader.initialize_schema()
+
+    # Existing data in production table
+    doc_id_v1 = str(uuid.uuid4())
+    set_id = str(uuid.uuid4())
+    with redshift_loader._get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"INSERT INTO products VALUES ('{doc_id_v1}', '{set_id}', 1, '2025-01-01', 'Prod', 'Mfg', 'Form', 'Route', true, '2025-01-01');"
+            )
+        conn.commit()
+
+    # New data in staging table (a new version of the existing product)
+    doc_id_v2 = str(uuid.uuid4())
+    with redshift_loader._get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"INSERT INTO products_staging VALUES ('{doc_id_v2}', '{set_id}', 2, '2025-01-02', 'Prod v2', 'Mfg', 'Form', 'Route', false, '2025-01-02');"
+            )
+        conn.commit()
+
+    # Run the delta merge
+    redshift_loader.merge_from_staging(mode="delta-load")
+
+    # Assertions
+    with redshift_loader._get_conn() as conn:
+        with conn.cursor() as cur:
+            # Check that the old version is gone
+            cur.execute(
+                "SELECT COUNT(*) FROM products WHERE document_id = %s", (doc_id_v1,)
+            )
+            assert cur.fetchone()[0] == 0
+            # Check that the new version is there
+            cur.execute(
+                "SELECT COUNT(*) FROM products WHERE document_id = %s", (doc_id_v2,)
+            )
+            assert cur.fetchone()[0] == 1
+        conn.commit()
+
+
+def test_etl_tracking_methods(
+    redshift_loader: RedshiftLoader, mocker: MockerFixture
+) -> None:
+    """Tests the ETL tracking methods for Redshift."""
+    test_schema_path = Path(__file__).parent / "redshift_schema_for_test.sql"
+    mocker.patch("py_load_spl.db.redshift.SQL_SCHEMA_PATH", test_schema_path)
+    redshift_loader.initialize_schema()
+
+    # Test start and end run
+    run_id = redshift_loader.start_run("delta-load")
+    assert isinstance(run_id, int)
+    redshift_loader.end_run(run_id, "SUCCESS", 100, None)
+
+    with redshift_loader._get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT status, records_loaded FROM etl_load_history WHERE run_id = %s",
+                (run_id,),
+            )
+            status, records = cur.fetchone()
+            assert status == "SUCCESS"
+            assert records == 100
+
+    # Test processed archives
+    redshift_loader.record_processed_archive("archive1.zip", "checksum1")
+    processed = redshift_loader.get_processed_archives()
+    assert "archive1.zip" in processed
+
+
+def test_connection_error(mocker: MockerFixture, redshift_settings, s3_settings):
+    """Tests that a connection error is handled correctly."""
+    mocker.patch(
+        "redshift_connector.connect", side_effect=redshift_connector.Error("Connection failed")
+    )
+    with pytest.raises(redshift_connector.Error):
+        loader = RedshiftLoader(redshift_settings, s3_settings)
+        with loader._get_conn():
+            pass  # This should fail
+
+
+def test_bulk_load_copy_failure(
+    redshift_loader: RedshiftLoader, tmp_path: Path, mocker: MockerFixture
+):
+    """Tests failure during the Redshift COPY command."""
+    intermediate_dir = tmp_path / "intermediate"
+    intermediate_dir.mkdir()
+    (intermediate_dir / "products_staging.csv").write_text("data")
+
+    # Mock the S3 uploader to avoid actual S3 calls
+    mocker.patch.object(
+        redshift_loader.s3_uploader,
+        "upload_directory",
+        return_value="s3://test-bucket/prefix",
+    )
+
+    # Mock the cursor to raise an error on execute
+    mock_cursor = MagicMock()
+    mock_cursor.execute.side_effect = redshift_connector.Error("COPY failed")
+
+    # Create a mock connection object that has a rollback method
+    mock_conn_obj = MagicMock(
+        cursor=MagicMock(return_value=MagicMock(__enter__=MagicMock(return_value=mock_cursor))),
+        rollback=MagicMock()
+    )
+    # Manually set the .conn attribute on the loader instance so the except block can find it
+    redshift_loader.conn = mock_conn_obj
+
+    # Also mock the context manager to return our mock connection
+    mocker.patch.object(
+        redshift_loader,
+        "_get_conn",
+        return_value=MagicMock(__enter__=MagicMock(return_value=mock_conn_obj)),
+    )
+
+    with pytest.raises(redshift_connector.Error):
+        redshift_loader.bulk_load_to_staging(intermediate_dir)
+
+    # Verify that rollback was called on the connection object
+    mock_conn_obj.rollback.assert_called_once()
+
+
+def test_post_load_cleanup(redshift_loader: RedshiftLoader, mocker: MockerFixture):
+    """Tests the post-load cleanup VACUUM/ANALYZE commands."""
+    mock_cursor = MagicMock()
+    mocker.patch.object(
+        redshift_loader,
+        "_get_conn",
+        return_value=mocker.MagicMock(
+            __enter__=mocker.MagicMock(
+                return_value=mocker.MagicMock(
+                    cursor=mocker.MagicMock(
+                        return_value=mocker.MagicMock(
+                            __enter__=mocker.MagicMock(return_value=mock_cursor)
+                        )
+                    )
+                )
+            )
+        ),
+    )
+
+    redshift_loader.post_load_cleanup("full-load")
+
+    # Check that VACUUM and ANALYZE were called
+    assert mock_cursor.execute.call_count == 2
+    assert "VACUUM;" in str(mock_cursor.execute.call_args_list)
+    assert "ANALYZE;" in str(mock_cursor.execute.call_args_list)
+
+
+def test_parquet_load_path(
+    redshift_loader: RedshiftLoader, tmp_path: Path, mocker: MockerFixture
+):
+    """Tests the code path for loading a Parquet file."""
+    intermediate_dir = tmp_path / "intermediate"
+    intermediate_dir.mkdir()
+    (intermediate_dir / "products_staging.parquet").write_text("dummy_parquet_data")
+
+    mocker.patch.object(
+        redshift_loader.s3_uploader,
+        "upload_directory",
+        return_value="s3://test-bucket/prefix",
+    )
+    mock_cursor = MagicMock()
+    mocker.patch.object(
+        redshift_loader,
+        "_get_conn",
+        return_value=mocker.MagicMock(
+            __enter__=mocker.MagicMock(
+                return_value=mocker.MagicMock(
+                    cursor=mocker.MagicMock(
+                        return_value=mocker.MagicMock(
+                            __enter__=mocker.MagicMock(return_value=mock_cursor)
+                        )
+                    )
+                )
+            )
+        ),
+    )
+
+    redshift_loader.bulk_load_to_staging(intermediate_dir)
+
+    assert mock_cursor.execute.call_count == 1
+    sql_command = mock_cursor.execute.call_args[0][0]
+    assert "FORMAT AS PARQUET" in sql_command
