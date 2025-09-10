@@ -5,7 +5,7 @@
 groups = ["default", "dev", "postgresql"]
 strategy = ["inherit_metadata"]
 lock_version = "4.5.0"
-content_hash = "sha256:706928b7b02365b3c9e767cb1a8c5dab69ca1be5fa5d608e3c0d98157431e477"
+content_hash = "sha256:7e8dcd7b82c183b9595eadb5313e7f27cba95833ddbce975173a421cd83e40cf"
 
 [[metadata.targets]]
 requires_python = "==3.12.*"
@@ -939,6 +939,20 @@ dependencies = [
 files = [
     {file = "pytest_cov-6.3.0-py3-none-any.whl", hash = "sha256:440db28156d2468cafc0415b4f8e50856a0d11faefa38f30906048fe490f1749"},
     {file = "pytest_cov-6.3.0.tar.gz", hash = "sha256:35c580e7800f87ce892e687461166e1ac2bcb8fb9e13aea79032518d6e503ff2"},
+]
+
+[[package]]
+name = "pytest-mock"
+version = "3.15.0"
+requires_python = ">=3.9"
+summary = "Thin-wrapper around the mock package for easier use with pytest"
+groups = ["dev"]
+dependencies = [
+    "pytest>=6.2.5",
+]
+files = [
+    {file = "pytest_mock-3.15.0-py3-none-any.whl", hash = "sha256:ef2219485fb1bd256b00e7ad7466ce26729b30eadfc7cbcdb4fa9a92ca68db6f"},
+    {file = "pytest_mock-3.15.0.tar.gz", hash = "sha256:ab896bd190316b9d5d87b277569dfcdf718b2d049a2ccff5f7aca279c002a1cf"},
 ]
 
 [[package]]

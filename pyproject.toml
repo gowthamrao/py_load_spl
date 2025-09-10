@@ -69,4 +69,5 @@ dev = [
     "pre-commit",
     "requests-mock>=1.12.1",
     "python-json-logger>=2.0.7",
+    "pytest-mock>=3.12.0",
 ]

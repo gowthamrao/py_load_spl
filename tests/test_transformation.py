@@ -4,6 +4,7 @@ from uuid import UUID
 
 import pyarrow.parquet as pq
 import pytest
+from pytest_mock import MockerFixture
 
 from py_load_spl.transformation import (
     CsvWriter,
@@ -113,3 +114,54 @@ def test_transformer_with_different_writers(
         assert ing_row["document_id"] == "d1b64b62-050a-4895-924c-d2862d2a6a69"
         assert ing_row["ingredient_name"] == "JULESTAT"
         assert ing_row["is_active_ingredient"] is True
+
+
+def test_parquet_writer_batching(tmp_path: Path, mocker: MockerFixture) -> None:
+    """
+    Tests that the ParquetWriter correctly writes data in batches to manage memory.
+    """
+    # 1. Arrange
+    output_dir = tmp_path / "test_output"
+    # Use a small batch size to easily trigger the flushing mechanism
+    writer = ParquetWriter(output_dir, batch_size=2)
+    transformer = Transformer(writer=writer)
+
+    # Create 3 records. With a batch size of 2, this should trigger one flush
+    # during the write operations, and one flush on close.
+    record2 = SAMPLE_PARSED_RECORD.copy()
+    record2["document_id"] = UUID("a" * 32)
+    record3 = SAMPLE_PARSED_RECORD.copy()
+    record3["document_id"] = UUID("b" * 32)
+    parsed_data_stream = [SAMPLE_PARSED_RECORD, record2, record3]
+
+    # Spy on the method that writes to the file
+    spy = mocker.spy(writer, "_flush_batch")
+
+    # 2. Act
+    transformer.transform_stream(parsed_data_stream)
+
+    # 3. Assert
+    # _flush_batch should be called once for 'products' when the 2nd record is processed,
+    # and then once for each table with remaining data when the writer is closed.
+    assert spy.call_count > 1
+
+    # Check the call for the 'products' table specifically.
+    # It should have been called once for the first batch, and once on close.
+    products_flush_calls = [
+        call for call in spy.call_args_list if call.args[0] == "products"
+    ]
+    assert len(products_flush_calls) == 2
+
+    # Verify the final file contains all records
+    products_file = output_dir / "products.parquet"
+    assert products_file.exists()
+    table = pq.read_table(products_file)
+    assert table.num_rows == 3
+
+    # Verify document_ids to ensure all records are present
+    doc_ids = {str(row["document_id"]) for row in table.to_pylist()}
+    assert doc_ids == {
+        "d1b64b62-050a-4895-924c-d2862d2a6a69",
+        "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+        "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+    }

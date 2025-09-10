@@ -105,45 +105,92 @@ class CsvWriter(FileWriter):
 
 
 class ParquetWriter(FileWriter):
-    """Writes data to Parquet files using PyArrow."""
+    """
+    Writes data to Parquet files in batches using PyArrow to keep memory usage low.
+    This implementation conforms to FRD requirement F005.4.
+    """
+
+    def __init__(self, output_dir: Path, batch_size: int = 100_000):
+        super().__init__(output_dir)
+        self.batch_size = batch_size
+        self._batches: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        self._parquet_writers: dict[str, pq.ParquetWriter] = {}
+        self._schemas: dict[str, pa.Schema] = {}
 
     def _open(self) -> None:
-        self._batches: dict[str, list[dict]] = defaultdict(list)
+        # ParquetWriter instances are created on-the-fly when the first batch for a
+        # given file is written, so there's nothing to do here.
+        pass
 
     def _close(self) -> None:
-        """Converts batches to strings and writes them to Parquet files."""
-        for name, batch in self._batches.items():
-            if not batch:
-                continue
+        """Writes any remaining records in the batches and closes all file writers."""
+        logger.info("Closing Parquet writer and flushing final batches...")
+        for name in list(self._batches.keys()):
+            self._flush_batch(name)
+        for writer in self._parquet_writers.values():
+            writer.close()
+        self._parquet_writers.clear()
 
-            # Bug Fix: Convert UUIDs to strings before writing to Parquet
-            processed_batch = []
-            for record in batch:
-                processed_record = {}
-                for key, value in record.items():
-                    if isinstance(value, UUID):
-                        processed_record[key] = str(value)
-                    else:
-                        processed_record[key] = value
-                processed_batch.append(processed_record)
+    def _preprocess_batch(self, batch: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """
+        Preprocesses a batch of records before writing to Parquet.
+        This is where type conversions, like UUID to string, happen.
+        """
+        processed_batch = []
+        for record in batch:
+            processed_record = {}
+            for key, value in record.items():
+                if isinstance(value, UUID):
+                    processed_record[key] = str(value)
+                else:
+                    processed_record[key] = value
+            processed_batch.append(processed_record)
+        return processed_batch
 
-            try:
-                table = pa.Table.from_pylist(processed_batch)
+    def _flush_batch(self, name: str) -> None:
+        """Writes the current in-memory batch to the corresponding Parquet file."""
+        batch = self._batches[name]
+        if not batch:
+            return
+
+        logger.info(f"Flushing batch of {len(batch)} records to {name}.parquet...")
+        processed_batch = self._preprocess_batch(batch)
+
+        try:
+            table = pa.Table.from_pylist(
+                processed_batch, schema=self._schemas.get(name)
+            )
+
+            if name not in self._parquet_writers:
+                # First time writing to this file, create the writer and store schema
                 filepath = self.output_dir / f"{name}.parquet"
-                pq.write_table(table, filepath)
-            except Exception as e:
-                logger.error(f"Failed to write Parquet file for {name}. Error: {e}")
+                self._schemas[name] = table.schema
+                self._parquet_writers[name] = pq.ParquetWriter(filepath, table.schema)
+
+            self._parquet_writers[name].write_table(table)
+            self._batches[name].clear()
+        except Exception as e:
+            logger.error(
+                f"Failed to write Parquet batch for {name}. Error: {e}", exc_info=True
+            )
+            raise
 
     def write(self, model_instance: BaseModel) -> None:
+        """
+        Appends a model instance to the appropriate in-memory batch.
+        If a batch reaches the defined `batch_size`, it is flushed to a file.
+        """
         model_type = type(model_instance)
         file_base_name = MODEL_TO_FILENAME_MAP.get(model_type)
         if not file_base_name:
             raise TypeError(f"No Parquet mapping for model type: {model_type}")
 
         dumped = model_instance.model_dump()
-
         self._batches[file_base_name].append(dumped)
         self.stats[f"{file_base_name}.parquet"] += 1
+
+        if len(self._batches[file_base_name]) >= self.batch_size:
+            self._flush_batch(file_base_name)
 
 
 # --- Transformer ---
