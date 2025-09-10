@@ -5,8 +5,9 @@ from concurrent.futures import as_completed
 from pathlib import Path
 
 from .acquisition import download_spl_archives
-from .config import RedshiftSettings, Settings
+from .config import DatabricksSettings, RedshiftSettings, Settings
 from .db.base import DatabaseLoader
+from .db.databricks import DatabricksLoader
 from .db.postgres import PostgresLoader
 from .db.redshift import RedshiftLoader
 from .db.sqlite import SqliteLoader
@@ -30,6 +31,11 @@ def get_db_loader(settings: Settings) -> DatabaseLoader:
             "DB adapter is 'redshift' but settings are not RedshiftSettings"
         )
         return RedshiftLoader(settings.db, settings.s3)
+    elif adapter == "databricks":
+        assert isinstance(settings.db, DatabricksSettings), (
+            "DB adapter is 'databricks' but settings are not DatabricksSettings"
+        )
+        return DatabricksLoader(settings.db)
     else:
         # This path should be unreachable due to Pydantic validation
         logger.error(f"Unsupported DB adapter '{adapter}'")

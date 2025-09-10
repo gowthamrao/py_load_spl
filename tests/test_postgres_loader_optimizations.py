@@ -164,9 +164,7 @@ def test_get_and_recreate_optimizable_objects(loader: PostgresLoader):
     # Manually create a new index to ensure we have something unique to find
     with loader._get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute(
-                "CREATE INDEX my_special_test_idx ON products (product_name);"
-            )
+            cur.execute("CREATE INDEX my_special_test_idx ON products (product_name);")
         conn.commit()
 
     _, initial_indexes = get_db_objects(loader)
