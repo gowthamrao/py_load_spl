@@ -1,12 +1,14 @@
 import json
 import tempfile
 from pathlib import Path
-from uuid import UUID, uuid4
+from uuid import uuid4
+
 import pyarrow.parquet as pq
-import pytest
 import xmltodict
+
 from py_load_spl.models import Product, SplRawDocument
 from py_load_spl.transformation import ParquetWriter
+
 
 def test_parquet_writer_writes_correct_data():
     """
@@ -72,7 +74,9 @@ def test_parquet_writer_writes_correct_data():
         # Verify the fix: raw_data should be a JSON string
         raw_data_json = raw_spl_data["raw_data"][0]
         assert isinstance(raw_data_json, str)
-        assert json.loads(raw_data_json) == {"section": {"title": "Warnings", "text": "May cause drowsiness."}}
+        assert json.loads(raw_data_json) == {
+            "section": {"title": "Warnings", "text": "May cause drowsiness."}
+        }
         assert raw_spl_data["source_filename"][0] == "test.zip/test.xml"
 
         # 3. Check stats

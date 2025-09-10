@@ -15,6 +15,9 @@ def test_app_exists() -> None:
     assert app is not None
 
 
+from py_load_spl.config import PostgresSettings
+
+
 @pytest.mark.integration
 def test_init_command(monkeypatch: pytest.MonkeyPatch) -> None:
     """
@@ -22,7 +25,7 @@ def test_init_command(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     with PostgresContainer("postgres:16-alpine") as postgres:
         # Create a settings object with the dynamic details from the container
-        test_db_settings = DatabaseSettings(
+        test_db_settings = PostgresSettings(
             host=postgres.get_container_host_ip(),
             port=postgres.get_exposed_port(5432),
             user=postgres.username,
@@ -91,7 +94,9 @@ class MockLoader:
 @pytest.fixture
 def mock_db_loader(monkeypatch: pytest.MonkeyPatch):
     """Fixture to mock the PostgresLoader to avoid real DB connections."""
-    monkeypatch.setattr("py_load_spl.main.get_db_loader", lambda settings: MockLoader(settings))
+    monkeypatch.setattr(
+        "py_load_spl.main.get_db_loader", lambda settings: MockLoader(settings)
+    )
 
 
 # def test_download_command(
@@ -220,7 +225,7 @@ def test_delta_load_end_to_end(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
 
     # 2. Set up the test container and settings
     with PostgresContainer("postgres:16-alpine") as postgres:
-        test_db_settings = DatabaseSettings(
+        test_db_settings = PostgresSettings(
             host=postgres.get_container_host_ip(),
             port=postgres.get_exposed_port(5432),
             user=postgres.username,

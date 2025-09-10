@@ -103,7 +103,7 @@ class SqliteLoader(DatabaseLoader):
                     sql = f"INSERT INTO {table_name} VALUES ({placeholders});"
                     logger.info(f"Loading {filepath.name} into {table_name}...")
 
-                    with open(filepath, "r", encoding="utf-8") as f:
+                    with open(filepath, encoding="utf-8") as f:
                         reader = csv.reader(f)
                         # Convert '\\N' back to None for SQLite
                         data_to_load = [
@@ -157,10 +157,14 @@ class SqliteLoader(DatabaseLoader):
 
                     logger.info("Inserting all data from staging...")
                     for table in parent_tables:
-                        cur.execute(f"INSERT INTO {table} SELECT * FROM {table}_staging;")
+                        cur.execute(
+                            f"INSERT INTO {table} SELECT * FROM {table}_staging;"
+                        )
                     for table in child_tables:
                         cols = child_columns[table]
-                        cur.execute(f"INSERT INTO {table} {cols} SELECT * FROM {table}_staging;")
+                        cur.execute(
+                            f"INSERT INTO {table} {cols} SELECT * FROM {table}_staging;"
+                        )
 
                 elif mode == "delta-load":
                     logger.info("Performing delta merge (using REPLACE)...")
@@ -183,7 +187,9 @@ class SqliteLoader(DatabaseLoader):
                             )
                             # Insert all records from staging for that table
                             cols = child_columns[table]
-                            cur.execute(f"INSERT INTO {table} {cols} SELECT * FROM {table}_staging;")
+                            cur.execute(
+                                f"INSERT INTO {table} {cols} SELECT * FROM {table}_staging;"
+                            )
 
                 # Update is_latest_version flag using a SQLite-compatible window function approach
                 logger.info("Updating is_latest_version flag for affected products...")

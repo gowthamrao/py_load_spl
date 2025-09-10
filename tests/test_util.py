@@ -44,11 +44,14 @@ def test_unzip_archive_file_not_found(tmp_path: Path):
         unzip_archive(non_existent_path, extract_to)
 
 
-@pytest.mark.parametrize("log_format, formatter_class", [
-    ("json", jsonlogger.JsonFormatter),
-    ("text", logging.Formatter),
-    ("TEXT", logging.Formatter), # Test case-insensitivity
-])
+@pytest.mark.parametrize(
+    "log_format, formatter_class",
+    [
+        ("json", jsonlogger.JsonFormatter),
+        ("text", logging.Formatter),
+        ("TEXT", logging.Formatter),  # Test case-insensitivity
+    ],
+)
 def test_setup_logging(monkeypatch, log_format, formatter_class):
     """Tests that logging is configured correctly for different formats."""
     mock_root_logger = MagicMock()

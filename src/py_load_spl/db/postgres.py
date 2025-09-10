@@ -5,10 +5,10 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Literal
 
+import psycopg2
 import pyarrow as pa
 import pyarrow.csv as pa_csv
 import pyarrow.parquet as pq
-import psycopg2
 from psycopg2.extensions import connection
 
 from ..config import DatabaseSettings
@@ -152,7 +152,7 @@ class PostgresLoader(DatabaseLoader):
                                 COPY {table_name} {column_spec} FROM STDIN
                                 WITH (FORMAT CSV, NULL '\\N', QUOTE '\"');
                             """
-                            with open(filepath, "r", encoding="utf-8") as f:
+                            with open(filepath, encoding="utf-8") as f:
                                 cur.copy_expert(sql, f)
 
                         elif filepath.suffix == ".parquet":

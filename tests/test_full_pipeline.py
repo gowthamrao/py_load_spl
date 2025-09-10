@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from py_load_spl.config import DatabaseSettings
+from py_load_spl.config import PostgresSettings
 from py_load_spl.db.postgres import PostgresLoader
 from py_load_spl.parsing import parse_spl_file
 from py_load_spl.transformation import CsvWriter, Transformer
@@ -99,7 +99,7 @@ def test_full_etl_pipeline_mocked(mock_psycopg2):
         # Ensure the cursor() context manager returns our mock cursor
         mock_conn.cursor.return_value.__enter__.return_value = mock_cur
 
-        db_settings = DatabaseSettings(
+        db_settings = PostgresSettings(
             host="localhost",
             port=5432,
             user="test",

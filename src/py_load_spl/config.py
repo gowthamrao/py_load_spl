@@ -1,6 +1,6 @@
 import logging
 import os
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import Field, HttpUrl
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -8,22 +8,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 logger = logging.getLogger(__name__)
 
 
-from typing import Optional
-
-
-class DatabaseSettings(BaseSettings):
-    """Database connection settings."""
-
+# Base class for all database settings
+class BaseDBSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="DB_")
-
-    adapter: Literal["postgresql", "sqlite"] = "postgresql"
-    # For SQLite, 'name' is the file path. For Postgres, it's the database name.
-    name: str = "spl_data"
-    # The following are optional, mainly for Postgres
-    host: Optional[str] = "localhost"
-    port: Optional[int] = 5432
-    user: Optional[str] = "postgres"
-    password: Optional[str] = "postgres"
     optimize_full_load: bool = Field(
         default=True,
         description="Enable dropping/recreating indexes and FKs during a full load.",
@@ -31,13 +18,51 @@ class DatabaseSettings(BaseSettings):
     )
 
 
+class PostgresSettings(BaseDBSettings):
+    adapter: Literal["postgresql"] = "postgresql"
+    name: str = "spl_data"
+    host: str = "localhost"
+    port: int = 5432
+    user: str = "postgres"
+    password: str = "postgres"
+
+
+class SqliteSettings(BaseDBSettings):
+    adapter: Literal["sqlite"] = "sqlite"
+    name: str = "spl_data.db"  # For SQLite, 'name' is the file path
+
+
+class RedshiftSettings(BaseDBSettings):
+    adapter: Literal["redshift"] = "redshift"
+    name: str = "spl_data"
+    host: str
+    port: int = 5439
+    user: str
+    password: str
+    iam_role_arn: str
+
+
+DatabaseSettings = Annotated[
+    PostgresSettings | SqliteSettings | RedshiftSettings,
+    Field(discriminator="adapter"),
+]
+
+
+class S3Settings(BaseSettings):
+    """Settings for AWS S3, used for cloud-based loaders."""
+
+    model_config = SettingsConfigDict(env_prefix="S3_")
+    bucket: str | None = None
+    prefix: str = "spl_data"
+
+
 class Settings(BaseSettings):
     """Main application settings."""
 
-    db: DatabaseSettings = Field(default_factory=DatabaseSettings)
+    db: DatabaseSettings = Field(default_factory=PostgresSettings)
+    s3: S3Settings = Field(default_factory=S3Settings)
     log_level: str = "INFO"
     data_dir: str = "data"
-    # The FRD requires a configurable download source (F001.1)
     fda_source_url: HttpUrl = (
         "https://dailymed.nlm.nih.gov/dailymed/spl-resources-all-drug-labels.cfm"  # type: ignore
     )
@@ -61,6 +86,7 @@ class Settings(BaseSettings):
 
 def get_settings() -> Settings:
     """Get the application settings."""
-    # In a real app, you might add logic here to load from different sources
     logger.info("Loading application settings...")
+    # Pydantic-settings automatically loads from environment variables,
+    # which is what we want.
     return Settings()

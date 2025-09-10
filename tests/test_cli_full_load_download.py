@@ -59,7 +59,9 @@ def test_full_load_downloads_when_no_source_is_provided(
 
     # Mock the core logic function to check if it's called
     with patch("py_load_spl.cli.run_full_load") as mock_run_full_load:
-        result = runner.invoke(app, ["--log-format", "text", "full-load"], catch_exceptions=False)
+        result = runner.invoke(
+            app, ["--log-format", "text", "full-load"], catch_exceptions=False
+        )
 
         assert result.exit_code == 0
         assert "Downloading all archives" in result.stdout

@@ -1,7 +1,6 @@
 import csv
 import json
 import logging
-import xmltodict
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from collections.abc import Iterable
@@ -11,6 +10,7 @@ from uuid import UUID
 
 import pyarrow as pa
 import pyarrow.parquet as pq
+import xmltodict
 from pydantic import BaseModel
 
 from .models import (

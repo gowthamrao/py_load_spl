@@ -4,10 +4,11 @@ import tempfile
 from concurrent.futures import as_completed
 from pathlib import Path
 
-from .acquisition import download_all_archives, download_spl_archives
-from .config import Settings
+from .acquisition import download_spl_archives
+from .config import RedshiftSettings, Settings
 from .db.base import DatabaseLoader
 from .db.postgres import PostgresLoader
+from .db.redshift import RedshiftLoader
 from .db.sqlite import SqliteLoader
 from .parsing import parse_spl_file
 from .transformation import CsvWriter, FileWriter, ParquetWriter, Transformer
@@ -24,7 +25,13 @@ def get_db_loader(settings: Settings) -> DatabaseLoader:
         return PostgresLoader(settings.db)
     elif adapter == "sqlite":
         return SqliteLoader(settings.db)
+    elif adapter == "redshift":
+        assert isinstance(
+            settings.db, RedshiftSettings
+        ), "DB adapter is 'redshift' but settings are not RedshiftSettings"
+        return RedshiftLoader(settings.db, settings.s3)
     else:
+        # This path should be unreachable due to Pydantic validation
         logger.error(f"Unsupported DB adapter '{adapter}'")
         raise ValueError(f"Unsupported DB adapter '{adapter}'")
 
@@ -39,8 +46,12 @@ def get_file_writer(settings: Settings, output_dir: Path) -> FileWriter:
         return CsvWriter(output_dir)
     else:
         # This case should be prevented by Pydantic validation, but as a safeguard:
-        logger.error(f"Unsupported intermediate format '{settings.intermediate_format}'")
-        raise ValueError(f"Unsupported intermediate format '{settings.intermediate_format}'")
+        logger.error(
+            f"Unsupported intermediate format '{settings.intermediate_format}'"
+        )
+        raise ValueError(
+            f"Unsupported intermediate format '{settings.intermediate_format}'"
+        )
 
 
 def _quarantine_and_parse_in_parallel(
@@ -104,9 +115,15 @@ def run_full_load(settings: Settings, source: Path):
                 return
             logger.info(f"Found {len(xml_files)} XML files to process.")
 
-            logger.info(f"Step 2: Parsing and Transforming in parallel (max_workers={settings.max_workers})...")
-            with concurrent.futures.ProcessPoolExecutor(max_workers=settings.max_workers) as executor:
-                parsed_data_stream = _quarantine_and_parse_in_parallel(xml_files, settings, executor)
+            logger.info(
+                f"Step 2: Parsing and Transforming in parallel (max_workers={settings.max_workers})..."
+            )
+            with concurrent.futures.ProcessPoolExecutor(
+                max_workers=settings.max_workers
+            ) as executor:
+                parsed_data_stream = _quarantine_and_parse_in_parallel(
+                    xml_files, settings, executor
+                )
                 transformer = Transformer(writer=writer)
                 stats = transformer.transform_stream(parsed_data_stream)
 
@@ -147,7 +164,10 @@ def run_delta_load(settings: Settings):
             return
         logger.info(f"Downloaded {len(downloaded_archives)} new archive(s).")
 
-        with tempfile.TemporaryDirectory() as xml_temp_dir_str, tempfile.TemporaryDirectory() as intermediate_dir_str:
+        with (
+            tempfile.TemporaryDirectory() as xml_temp_dir_str,
+            tempfile.TemporaryDirectory() as intermediate_dir_str,
+        ):
             xml_temp_dir = Path(xml_temp_dir_str)
             intermediate_dir = Path(intermediate_dir_str)
             writer = get_file_writer(settings, intermediate_dir)
@@ -161,9 +181,15 @@ def run_delta_load(settings: Settings):
             xml_files = list(xml_temp_dir.glob("**/*.xml"))
             logger.info(f"Found {len(xml_files)} XML files to process.")
 
-            logger.info(f"Step 4: Parsing and Transforming in parallel (max_workers={settings.max_workers})...")
-            with concurrent.futures.ProcessPoolExecutor(max_workers=settings.max_workers) as executor:
-                parsed_data_stream = _quarantine_and_parse_in_parallel(xml_files, settings, executor)
+            logger.info(
+                f"Step 4: Parsing and Transforming in parallel (max_workers={settings.max_workers})..."
+            )
+            with concurrent.futures.ProcessPoolExecutor(
+                max_workers=settings.max_workers
+            ) as executor:
+                parsed_data_stream = _quarantine_and_parse_in_parallel(
+                    xml_files, settings, executor
+                )
                 transformer = Transformer(writer=writer)
                 stats = transformer.transform_stream(parsed_data_stream)
             logger.info("Parsing and Transformation complete.")

@@ -1,14 +1,15 @@
 import hashlib
-import pytest
-import requests
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+import requests
+
 from py_load_spl.acquisition import (
-    download_archive,
-    get_archive_list,
-    download_spl_archives,
     download_all_archives,
+    download_archive,
+    download_spl_archives,
+    get_archive_list,
 )
 from py_load_spl.config import Settings
 from py_load_spl.models import Archive
@@ -45,10 +46,12 @@ SAMPLE_HTML_MALFORMED = """
 </html>
 """
 
+
 @pytest.fixture
 def mock_settings(tmp_path: Path) -> Settings:
     """Provides a Settings instance with a temporary download path."""
     return Settings(download_path=str(tmp_path))
+
 
 def test_get_archive_list(mock_settings: Settings, requests_mock):
     """Tests that the archive list is scraped correctly from the HTML."""
@@ -59,13 +62,16 @@ def test_get_archive_list(mock_settings: Settings, requests_mock):
     assert archives[0].checksum == "11111111111111111111111111111111"
     assert archives[1].url == "https://example.com/part2.zip"
 
+
 def test_get_archive_list_request_error(mock_settings: Settings, requests_mock):
     """Tests that a network error during list fetch is handled."""
     requests_mock.get(
-        str(mock_settings.fda_source_url), exc=requests.RequestException("Network Error")
+        str(mock_settings.fda_source_url),
+        exc=requests.RequestException("Network Error"),
     )
     with pytest.raises(requests.RequestException):
         get_archive_list(mock_settings)
+
 
 def test_get_archive_list_malformed_page(mock_settings: Settings, requests_mock):
     """Tests that the scraper handles malformed or unexpected HTML gracefully."""
@@ -73,11 +79,13 @@ def test_get_archive_list_malformed_page(mock_settings: Settings, requests_mock)
     archives = get_archive_list(mock_settings)
     assert len(archives) == 0
 
+
 def test_get_archive_list_no_archives_found(mock_settings: Settings, requests_mock):
     """Tests the case where the page is valid but contains no archives."""
     requests_mock.get(str(mock_settings.fda_source_url), text="<html></html>")
     archives = get_archive_list(mock_settings)
     assert len(archives) == 0
+
 
 def test_download_archive_success(mock_settings: Settings, requests_mock):
     """Tests a successful download and checksum verification."""
@@ -87,10 +95,15 @@ def test_download_archive_success(mock_settings: Settings, requests_mock):
         url="https://example.com/test.zip",
         checksum=hashlib.md5(content).hexdigest(),
     )
-    requests_mock.get("https://example.com/test.zip", content=content, headers={"Content-Length": str(len(content))})
+    requests_mock.get(
+        "https://example.com/test.zip",
+        content=content,
+        headers={"Content-Length": str(len(content))},
+    )
     file_path = download_archive(archive, mock_settings)
     assert file_path.exists()
     assert file_path.read_bytes() == content
+
 
 def test_download_archive_checksum_mismatch(mock_settings: Settings, requests_mock):
     """Tests that a checksum mismatch raises a ValueError and cleans up the file."""
@@ -105,6 +118,7 @@ def test_download_archive_checksum_mismatch(mock_settings: Settings, requests_mo
         download_archive(archive, mock_settings)
     assert not file_path.exists()
 
+
 def test_download_archive_network_error(mock_settings: Settings, requests_mock):
     """Tests that a network error during download is handled and the file is cleaned up."""
     archive = Archive(
@@ -113,12 +127,14 @@ def test_download_archive_network_error(mock_settings: Settings, requests_mock):
         checksum="whatever",
     )
     requests_mock.get(
-        "https://example.com/test.zip", exc=requests.RequestException("Connection timed out")
+        "https://example.com/test.zip",
+        exc=requests.RequestException("Connection timed out"),
     )
     file_path = Path(mock_settings.download_path) / archive.name
     with pytest.raises(requests.RequestException):
         download_archive(archive, mock_settings)
     assert not file_path.exists()
+
 
 def test_download_spl_archives_db_error(mock_settings: Settings):
     """Tests that the process aborts gracefully if the DB is down."""
@@ -127,7 +143,10 @@ def test_download_spl_archives_db_error(mock_settings: Settings):
     result = download_spl_archives(mock_loader)
     assert result == []
 
-def test_download_spl_archives_no_archives_at_source(mock_settings: Settings, requests_mock):
+
+def test_download_spl_archives_no_archives_at_source(
+    mock_settings: Settings, requests_mock
+):
     """Tests when the scraper finds no archives."""
     mock_loader = MagicMock()
     mock_loader.get_processed_archives.return_value = set()
@@ -135,23 +154,34 @@ def test_download_spl_archives_no_archives_at_source(mock_settings: Settings, re
     result = download_spl_archives(mock_loader)
     assert result == []
 
+
 def test_download_all_archives_single_failure(mock_settings: Settings, requests_mock):
     """Tests that one failed download doesn't stop the whole process."""
     requests_mock.get(str(mock_settings.fda_source_url), text=SAMPLE_HTML_VALID)
     # Make the first archive download fail
-    requests_mock.get("https://example.com/part1.zip", exc=requests.RequestException("Download failed"))
+    requests_mock.get(
+        "https://example.com/part1.zip",
+        exc=requests.RequestException("Download failed"),
+    )
     # Make the second one succeed
-    requests_mock.get("https://example.com/part2.zip", content=b"data", headers={"Content-Length": "4"})
+    requests_mock.get(
+        "https://example.com/part2.zip",
+        content=b"data",
+        headers={"Content-Length": "4"},
+    )
 
     downloaded = download_all_archives(mock_settings)
     assert len(downloaded) == 1
     assert downloaded[0].name == "part2.zip"
+
 
 def test_download_all_archives_no_settings(requests_mock):
     """Tests that get_settings() is called if no settings are provided."""
     with patch("py_load_spl.acquisition.get_settings") as mock_get_settings:
         mock_settings_instance = Settings()
         mock_get_settings.return_value = mock_settings_instance
-        requests_mock.get(str(mock_settings_instance.fda_source_url), text="<html></html>")
+        requests_mock.get(
+            str(mock_settings_instance.fda_source_url), text="<html></html>"
+        )
         download_all_archives()
         mock_get_settings.assert_called_once()

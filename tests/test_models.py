@@ -1,7 +1,7 @@
 import uuid
-from datetime import date
 
 import pytest
+
 from py_load_spl.models import (
     Ingredient,
     MarketingStatus,
