@@ -164,7 +164,9 @@ def run_full_load(settings: Settings, source: Path) -> None:
             loader.end_run(run_id, "SUCCESS", loaded_count, None)
         logger.info("Full load process finished successfully.")
     except Exception as e:
-        logger.exception("An error occurred during the full load process")
+        logger.error(
+            f"An error occurred during the full load process: {e}", exc_info=True
+        )
         if run_id:
             loader.end_run(run_id, "FAILED", 0, str(e))
         raise
@@ -248,7 +250,7 @@ def run_delta_load(settings: Settings) -> None:
             loader.end_run(run_id, "SUCCESS", loaded_count, None)
         logger.info("Delta load process finished successfully.")
     except Exception as e:
-        logger.exception("Delta load failed")
+        logger.error(f"Delta load failed: {e}", exc_info=True)
         if run_id:
             loader.end_run(run_id, "FAILED", 0, str(e))
         raise
