@@ -98,6 +98,7 @@ def test_bulk_and_full_merge(sqlite_loader: SqliteLoader, tmp_path: Path) -> Non
 
 from typing import Any
 
+
 def _create_intermediate_files(
     tmp_path: Path, file_format: str, data: dict[str, list[tuple[Any, ...]]]
 ) -> None:

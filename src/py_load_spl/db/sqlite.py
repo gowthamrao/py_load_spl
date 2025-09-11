@@ -112,9 +112,7 @@ class SqliteLoader(DatabaseLoader):
 
                     num_columns = column_spec.count(",") + 1
                     placeholders = ", ".join(["?"] * num_columns)
-                    sql = (
-                        f"INSERT INTO {table_name} ({column_spec}) VALUES ({placeholders});"
-                    )
+                    sql = f"INSERT INTO {table_name} ({column_spec}) VALUES ({placeholders});"
 
                     if filepath.suffix == ".csv":
                         batch_size = 20000
