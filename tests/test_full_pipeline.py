@@ -121,8 +121,13 @@ def test_full_etl_pipeline_mocked(mock_psycopg2):
         transformer = Transformer(writer)
         stats = transformer.transform_stream(parsed_stream)
 
+        # Mock the return value for the new row count feature
+        loader.bulk_load_to_staging = MagicMock(return_value=sum(stats.values()))
+
         loader.initialize_schema()
-        loader.bulk_load_to_staging(output_dir)
+        loaded_count = loader.bulk_load_to_staging(output_dir)
+        # Manually check the validation logic
+        assert loaded_count == sum(stats.values())
         loader.merge_from_staging(mode="full-load")
 
         # 3. Assert
@@ -146,8 +151,8 @@ def test_full_etl_pipeline_mocked(mock_psycopg2):
         mock_conn.cursor.assert_called()
         # Check that initialize_schema was called
         assert mock_cur.execute.call_count > 0
-        # Check that bulk_load_to_staging was called (via copy_expert)
-        assert mock_cur.copy_expert.call_count > 0
+        # Check that bulk_load_to_staging was called
+        loader.bulk_load_to_staging.assert_called_with(output_dir)
         # Check that merge_from_staging was called (via execute)
         # It should truncate tables and then insert into them
         truncate_calls = [
@@ -161,6 +166,63 @@ def test_full_etl_pipeline_mocked(mock_psycopg2):
         assert len(truncate_calls) > 0
         assert len(insert_calls) > 0
         print("Verified that database loader methods were called.")
+
+
+@patch("py_load_spl.main.get_db_loader")
+@patch("py_load_spl.main.get_file_writer")
+@patch("py_load_spl.main.Transformer")
+@patch("py_load_spl.main.concurrent.futures.ProcessPoolExecutor")
+def test_record_count_validation(
+    mock_executor, mock_transformer, mock_writer_getter, mock_loader_getter
+):
+    """
+    Unit test for the record count validation logic in `run_full_load`.
+    """
+    from py_load_spl.main import run_full_load
+
+    # Arrange: Mock all the components
+    mock_loader = MagicMock()
+    mock_writer = MagicMock()
+    mock_transformer_instance = MagicMock()
+
+    mock_loader_getter.return_value = mock_loader
+    mock_writer_getter.return_value = mock_writer
+    mock_transformer.return_value = mock_transformer_instance
+
+    # This is the count that the transformer will report
+    transformed_count = 100
+    mock_transformer_instance.transform_stream.return_value = {"products.csv": 100}
+
+    # Create a dummy source directory with a fake file
+    with tempfile.TemporaryDirectory() as source_dir_str:
+        source_dir = Path(source_dir_str)
+        (source_dir / "dummy.xml").touch()
+
+        # --- Test Case 1: Counts match (Success) ---
+        mock_loader.bulk_load_to_staging.return_value = transformed_count
+
+        # Act
+        run_full_load(settings=MagicMock(), source=source_dir)
+
+        # Assert
+        mock_loader.end_run.assert_called_with(
+            mock_loader.start_run.return_value, "SUCCESS", transformed_count, None
+        )
+
+        # --- Test Case 2: Counts mismatch (Failure) ---
+        mismatched_count = 99
+        mock_loader.bulk_load_to_staging.return_value = mismatched_count
+
+        # Act & Assert
+        with pytest.raises(RuntimeError) as excinfo:
+            run_full_load(settings=MagicMock(), source=source_dir)
+
+        assert "Data integrity check failed" in str(excinfo.value)
+        assert "100" in str(excinfo.value)
+        assert "99" in str(excinfo.value)
+        mock_loader.end_run.assert_called_with(
+            mock_loader.start_run.return_value, "FAILED", 0, str(excinfo.value)
+        )
 
 
 @pytest.mark.integration

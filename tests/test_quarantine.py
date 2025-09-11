@@ -51,8 +51,16 @@ class MockLoader:
     def pre_load_optimization(self, mode):
         pass
 
-    def bulk_load_to_staging(self, intermediate_dir):
-        pass
+    def bulk_load_to_staging(self, intermediate_dir: Path) -> int:
+        """
+        A mock implementation that counts the rows in the intermediate files
+        to simulate a real loader's return value.
+        """
+        total_rows = 0
+        for csv_file in intermediate_dir.glob("*.csv"):
+            with open(csv_file) as f:
+                total_rows += sum(1 for line in f)
+        return total_rows
 
     def merge_from_staging(self, mode):
         pass

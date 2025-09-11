@@ -19,9 +19,7 @@ def s3_settings() -> S3Settings:
 
 
 @mock_aws
-def test_s3_upload_directory_success(
-    s3_settings: S3Settings, tmp_path: Path
-) -> None:
+def test_s3_upload_directory_success(s3_settings: S3Settings, tmp_path: Path) -> None:
     """Verify that files in a directory are uploaded to S3."""
     # 1. Setup: Create mock S3 bucket and local files
     assert s3_settings.bucket is not None

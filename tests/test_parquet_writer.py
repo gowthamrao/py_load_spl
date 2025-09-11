@@ -4,7 +4,6 @@ from datetime import date
 from pathlib import Path
 from uuid import uuid4
 
-import pyarrow as pa
 import pyarrow.parquet as pq
 import xmltodict
 

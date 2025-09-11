@@ -53,8 +53,13 @@ class DatabricksLoader(DatabaseLoader):
                         cursor.execute(statement)
         logger.info("Databricks schema initialized successfully.")
 
-    def bulk_load_to_staging(self, intermediate_dir: Path) -> None:
-        """Uploads intermediate files to S3 and uses COPY INTO."""
+    def bulk_load_to_staging(self, intermediate_dir: Path) -> int:
+        """
+        Uploads intermediate files to S3 and uses COPY INTO.
+
+        :return: The total number of rows loaded.
+        """
+        total_rows_loaded = 0
         s3_uri = self.s3_uploader.upload_directory(intermediate_dir)
         logger.info(f"Intermediate files uploaded to {s3_uri}")
 
@@ -62,7 +67,7 @@ class DatabricksLoader(DatabaseLoader):
             with connection.cursor() as cursor:
                 for table_base_name in self._get_table_names():
                     # Find all chunked files for the current table
-                    for file_path in intermediate_dir.glob(f"{table_base_name}_*.csv"):
+                    for file_path in intermediate_dir.glob(f"{table_base_name}*.csv"):
                         s3_file_path = f"{s3_uri}/{file_path.name}"
                         staging_table = f"{table_base_name}_staging"
 
@@ -70,16 +75,23 @@ class DatabricksLoader(DatabaseLoader):
                         COPY INTO {staging_table}
                         FROM '{s3_file_path}'
                         FILEFORMAT = CSV
-                        FORMAT_OPTIONS ('header' = 'true')
+                        FORMAT_OPTIONS ('header' = 'false', 'nullValue' = '\\N')
                         COPY_OPTIONS ('mergeSchema' = 'true')
                         """
                         logger.info(
                             f"Executing COPY INTO for {staging_table} from {s3_file_path}..."
                         )
                         cursor.execute(copy_sql)
-                        logger.info(
-                            f"Successfully loaded data into {staging_table} from {file_path.name}."
-                        )
+                        # The rowcount from the cursor gives us the number of
+                        # affected rows.
+                        if cursor.rowcount:
+                            total_rows_loaded += cursor.rowcount
+                            logger.info(f"Loaded {cursor.rowcount} rows.")
+        logger.info(
+            "Databricks bulk load complete. Total rows loaded: %d",
+            total_rows_loaded,
+        )
+        return total_rows_loaded
 
     def pre_load_optimization(self, mode: Literal["full-load", "delta-load"]) -> None:
         pass
@@ -152,8 +164,11 @@ class DatabricksLoader(DatabaseLoader):
                 # Databricks doesn't have a reliable last_insert_id, so we get the max.
                 # This is not perfectly safe in highly concurrent environments.
                 cursor.execute("SELECT MAX(run_id) FROM etl_load_history")
-                run_id = cursor.fetchone()[0]
-                return run_id
+                row = cursor.fetchone()
+                if row:
+                    run_id: int = row[0]
+                    return run_id
+                raise RuntimeError("Could not retrieve run_id after starting run.")
 
     def end_run(
         self, run_id: int, status: str, records_loaded: int, error_log: str | None

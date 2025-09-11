@@ -118,26 +118,36 @@ class PostgresLoader(DatabaseLoader):
                 self.conn.rollback()
             raise
 
-    def bulk_load_to_staging(self, intermediate_dir: Path) -> None:
+    def bulk_load_to_staging(self, intermediate_dir: Path) -> int:
         """
         Loads data from intermediate files (CSV or Parquet) into staging tables.
         Parquet files are converted to a CSV representation in-memory before loading.
+
+        :return: The total number of rows loaded.
         """
         logger.info(f"Bulk loading data from {intermediate_dir} into staging tables...")
+        total_rows_loaded = 0
         files_to_process = list(intermediate_dir.glob("*.csv")) + list(
             intermediate_dir.glob("*.parquet")
         )
 
         if not files_to_process:
             logger.warning(f"No intermediate files found in {intermediate_dir}.")
-            return
+            return 0
 
         # Define the columns for tables where we are not providing the surrogate key.
         # The order must match the Pydantic model field order.
         table_columns = {
-            "ingredients_staging": "(document_id, ingredient_name, substance_code, strength_numerator, strength_denominator, unit_of_measure, is_active_ingredient)",
-            "packaging_staging": "(document_id, package_ndc, package_description, package_type)",
-            "marketing_status_staging": "(document_id, marketing_category, start_date, end_date)",
+            "ingredients_staging": (
+                "(document_id, ingredient_name, substance_code, strength_numerator, "
+                "strength_denominator, unit_of_measure, is_active_ingredient)"
+            ),
+            "packaging_staging": (
+                "(document_id, package_ndc, package_description, package_type)"
+            ),
+            "marketing_status_staging": (
+                "(document_id, marketing_category, start_date, end_date)"
+            ),
             "product_ndcs_staging": "(document_id, ndc_code)",
         }
 
@@ -150,16 +160,16 @@ class PostgresLoader(DatabaseLoader):
                         logger.info(f"Loading {filepath.name} into {table_name}...")
 
                         if filepath.suffix == ".csv":
-                            # Original logic for CSV (no header)
                             sql = f"""
                                 COPY {table_name} {column_spec} FROM STDIN
                                 WITH (FORMAT CSV, NULL '\\N', QUOTE '\"');
                             """
                             with open(filepath, encoding="utf-8") as f:
                                 cur.copy_expert(sql, f)
+                                total_rows_loaded += cur.rowcount
+                                logger.info(f"Loaded {cur.rowcount} rows.")
 
                         elif filepath.suffix == ".parquet":
-                            # Convert Parquet to in-memory CSV with header
                             sql = f"""
                                 COPY {table_name} {column_spec} FROM STDIN
                                 WITH (FORMAT CSV, NULL '\\N', QUOTE '\"', HEADER TRUE);
@@ -167,11 +177,17 @@ class PostgresLoader(DatabaseLoader):
                             table = pq.read_table(filepath)
                             buffer = io.StringIO()
                             pa_csv.write_csv(table, buffer)
-                            buffer.seek(0)  # Reset buffer to the beginning
+                            buffer.seek(0)
                             cur.copy_expert(sql, buffer)
+                            total_rows_loaded += cur.rowcount
+                            logger.info(f"Loaded {cur.rowcount} rows.")
 
                 conn.commit()
-            logger.info("Bulk load to staging tables complete.")
+            logger.info(
+                "Bulk load to staging tables complete. Total rows loaded: %d",
+                total_rows_loaded,
+            )
+            return total_rows_loaded
         except (OSError, psycopg2.Error, pa.ArrowException) as e:
             logger.error(f"Bulk load to staging failed: {e}")
             if self.conn:
