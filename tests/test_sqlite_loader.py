@@ -1,6 +1,9 @@
 from collections.abc import Generator
 from pathlib import Path
+from uuid import uuid4
 
+import pyarrow as pa
+import pyarrow.parquet as pq
 import pytest
 
 from py_load_spl.config import SqliteSettings
@@ -91,6 +94,150 @@ def test_bulk_and_full_merge(sqlite_loader: SqliteLoader, tmp_path: Path) -> Non
             "SELECT product_name FROM products WHERE document_id = 'doc1'"
         ).fetchone()
         assert res[0] == "Product A"
+
+
+from typing import Any
+
+def _create_intermediate_files(
+    tmp_path: Path, file_format: str, data: dict[str, list[tuple[Any, ...]]]
+) -> None:
+    """Helper to create CSV or Parquet files for testing."""
+    intermediate_dir = tmp_path / "intermediate"
+    intermediate_dir.mkdir(exist_ok=True)
+
+    for table_name, rows in data.items():
+        if not rows:
+            continue
+
+        filepath = intermediate_dir / f"{table_name}.{file_format}"
+        if file_format == "csv":
+            import csv
+
+            with open(filepath, "w", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
+                # Write rows, converting None to the expected '\\N' null marker
+                writer.writerows(
+                    [["\\N" if item is None else item for item in row] for row in rows]
+                )
+        elif file_format == "parquet":
+            # Create a PyArrow table from the rows.
+            # This is more complex because we need to define a schema.
+            # For simplicity in testing, we assume string types for most things.
+            if table_name == "products":
+                schema = pa.schema(
+                    [
+                        pa.field("document_id", pa.string()),
+                        pa.field("set_id", pa.string()),
+                        pa.field("version_number", pa.int64()),
+                        pa.field("effective_time", pa.string()),
+                        pa.field("product_name", pa.string()),
+                        pa.field("manufacturer_name", pa.string()),
+                        pa.field("dosage_form", pa.string()),
+                        pa.field("route_of_administration", pa.string()),
+                        pa.field("is_latest_version", pa.int64()),
+                        pa.field("loaded_at", pa.string()),
+                    ]
+                )
+            elif table_name == "ingredients":
+                schema = pa.schema(
+                    [
+                        pa.field("document_id", pa.string()),
+                        pa.field("ingredient_name", pa.string()),
+                        pa.field("substance_code", pa.string()),
+                        pa.field("strength_numerator", pa.string()),
+                        pa.field("strength_denominator", pa.string()),
+                        pa.field("unit_of_measure", pa.string()),
+                        pa.field("is_active_ingredient", pa.int64()),
+                    ]
+                )
+            else:  # spl_raw_documents
+                schema = pa.schema(
+                    [
+                        pa.field("document_id", pa.string()),
+                        pa.field("set_id", pa.string()),
+                        pa.field("version_number", pa.int64()),
+                        pa.field("effective_time", pa.string()),
+                        pa.field("raw_data", pa.string()),
+                        pa.field("source_filename", pa.string()),
+                        pa.field("loaded_at", pa.string()),
+                    ]
+                )
+
+            table = pa.Table.from_pylist(
+                [dict(zip(schema.names, row, strict=False)) for row in rows],
+                schema=schema,
+            )
+            pq.write_table(table, filepath)
+
+
+@pytest.mark.parametrize("file_format", ["csv", "parquet"])
+def test_bulk_load_and_merge_formats(
+    sqlite_loader: SqliteLoader, tmp_path: Path, file_format: str
+) -> None:
+    """
+    A more robust test for bulk loading and merging, parameterized
+    for both CSV and Parquet formats. This validates the new Parquet path.
+    """
+    # 1. Arrange
+    doc_id = str(uuid4())
+    set_id = str(uuid4())
+    test_data: dict[str, list[tuple[Any, ...]]] = {
+        "spl_raw_documents": [
+            (
+                doc_id,
+                set_id,
+                1,
+                "2025-01-01",
+                '{"key":"value"}',
+                "file.zip",
+                "2025-01-01T12:00:00Z",
+            )
+        ],
+        "products": [
+            (
+                doc_id,
+                set_id,
+                1,
+                "2025-01-01",
+                "Parquet Product",
+                "Arrow Inc.",
+                "TABLET",
+                "ORAL",
+                1,
+                "2025-01-01T12:00:00Z",
+            )
+        ],
+        "ingredients": [
+            (doc_id, "Parquet Ingredient", "UNII-ARROW", "500", "1", "mg", 1)
+        ],
+    }
+    _create_intermediate_files(tmp_path, file_format, test_data)
+
+    # 2. Act
+    intermediate_dir = tmp_path / "intermediate"
+    sqlite_loader.bulk_load_to_staging(intermediate_dir)
+    sqlite_loader.merge_from_staging(mode="full-load")
+
+    # 3. Assert
+    with sqlite_loader._get_conn() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT product_name FROM products WHERE document_id = ?", (doc_id,)
+        )
+        res = cur.fetchone()
+        assert res is not None
+        assert res[0] == "Parquet Product"
+
+        cur.execute(
+            "SELECT ingredient_name FROM ingredients WHERE document_id = ?", (doc_id,)
+        )
+        res = cur.fetchone()
+        assert res is not None
+        assert res[0] == "Parquet Ingredient"
+
+        # Check that staging tables are empty after a merge
+        cur.execute("SELECT count(*) FROM products_staging")
+        assert cur.fetchone()[0] == 0
 
 
 def test_delta_merge_updates_is_latest_version_correctly(

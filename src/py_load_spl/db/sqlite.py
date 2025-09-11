@@ -6,6 +6,9 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Literal
 
+import pyarrow as pa
+import pyarrow.parquet as pq
+
 from ..config import DatabaseSettings, SqliteSettings
 from .base import DatabaseLoader
 
@@ -37,9 +40,9 @@ class SqliteLoader(DatabaseLoader):
     """SQLite-specific implementation of the DatabaseLoader."""
 
     def __init__(self, db_settings: DatabaseSettings) -> None:
-        assert isinstance(
-            db_settings, SqliteSettings
-        ), "SqliteLoader requires a SqliteSettings object"
+        assert isinstance(db_settings, SqliteSettings), (
+            "SqliteLoader requires a SqliteSettings object"
+        )
         self.settings = db_settings
         self.db_path = Path(self.settings.name)
         self.conn: sqlite3.Connection | None = None
@@ -86,10 +89,15 @@ class SqliteLoader(DatabaseLoader):
         logger.info(
             f"Bulk loading data from {intermediate_dir} into SQLite staging tables..."
         )
-        files_to_process = list(intermediate_dir.glob("*.csv"))
+        files_to_process = list(intermediate_dir.glob("*.csv")) + list(
+            intermediate_dir.glob("*.parquet")
+        )
         if not files_to_process:
-            logger.warning(f"No intermediate CSV files found in {intermediate_dir}.")
+            logger.warning(
+                f"No intermediate CSV or Parquet files found in {intermediate_dir}."
+            )
             return
+
         try:
             with self._get_conn() as conn:
                 cur = conn.cursor()
@@ -97,28 +105,45 @@ class SqliteLoader(DatabaseLoader):
                     table_base_name = filepath.stem
                     table_name = f"{table_base_name}_staging"
                     column_spec = TABLE_COLUMNS_MAP.get(table_base_name)
+
                     if not column_spec:
                         logger.warning(f"No column mapping for {table_name}, skipping.")
                         continue
+
                     num_columns = column_spec.count(",") + 1
                     placeholders = ", ".join(["?"] * num_columns)
-                    sql = f"INSERT INTO {table_name} ({column_spec}) VALUES ({placeholders});"
-                    batch_size = 20000
-                    batch = []
-                    with open(filepath, encoding="utf-8") as f:
-                        reader = csv.reader(f)
-                        for row in reader:
-                            processed_row = tuple(
-                                None if cell == "\\N" else cell for cell in row
-                            )
-                            batch.append(processed_row)
-                            if len(batch) >= batch_size:
+                    sql = (
+                        f"INSERT INTO {table_name} ({column_spec}) VALUES ({placeholders});"
+                    )
+
+                    if filepath.suffix == ".csv":
+                        batch_size = 20000
+                        batch = []
+                        with open(filepath, encoding="utf-8") as f:
+                            reader = csv.reader(f)
+                            for row in reader:
+                                processed_row = tuple(
+                                    # Handle the NULL representation from transformer
+                                    None if cell == "\\N" else cell
+                                    for cell in row
+                                )
+                                batch.append(processed_row)
+                                if len(batch) >= batch_size:
+                                    cur.executemany(sql, batch)
+                                    batch.clear()
+                            if batch:
                                 cur.executemany(sql, batch)
-                                batch.clear()
-                        if batch:
-                            cur.executemany(sql, batch)
+
+                    elif filepath.suffix == ".parquet":
+                        table = pq.read_table(filepath)
+                        # Process in batches to keep memory usage low
+                        for batch in table.to_batches(max_chunksize=20000):
+                            # Convert batch to list of tuples for executemany
+                            data = list(zip(*batch.to_pydict().values(), strict=False))
+                            cur.executemany(sql, data)
+
                 conn.commit()
-        except (OSError, sqlite3.Error) as e:
+        except (OSError, sqlite3.Error, pa.ArrowException) as e:
             logger.error(f"SQLite bulk load to staging failed: {e}", exc_info=True)
             if self.conn:
                 self.conn.rollback()
@@ -154,11 +179,13 @@ class SqliteLoader(DatabaseLoader):
                     for table in child_tables:
                         cols = TABLE_COLUMNS_MAP[table]
                         cur.execute(
-                            f"INSERT INTO {table} ({cols}) SELECT * FROM {table}_staging;"
+                            f"INSERT INTO {table} ({cols}) "
+                            f"SELECT * FROM {table}_staging;"
                         )
                 elif mode == "delta-load":
                     cur.execute(
-                        "REPLACE INTO spl_raw_documents SELECT * FROM spl_raw_documents_staging;"
+                        "REPLACE INTO spl_raw_documents "
+                        "SELECT * FROM spl_raw_documents_staging;"
                     )
                     cur.execute("REPLACE INTO products SELECT * FROM products_staging;")
                     cur.execute("SELECT DISTINCT document_id FROM products_staging;")
@@ -172,7 +199,8 @@ class SqliteLoader(DatabaseLoader):
                             )
                             cols = TABLE_COLUMNS_MAP[table]
                             cur.execute(
-                                f"INSERT INTO {table} ({cols}) SELECT * FROM {table}_staging;"
+                                f"INSERT INTO {table} ({cols}) "
+                                f"SELECT * FROM {table}_staging;"
                             )
                 self.update_latest_version_flag(cur)
                 for table in parent_tables + child_tables:
@@ -185,29 +213,64 @@ class SqliteLoader(DatabaseLoader):
             raise
 
     def update_latest_version_flag(self, cur: sqlite3.Cursor) -> None:
-        """Updates the is_latest_version flag for all affected products."""
-        logger.info("Updating is_latest_version flag...")
+        """
+        Updates the is_latest_version flag for all affected products.
+        This uses a multi-step process to ensure compatibility with SQLite.
+        """
+        logger.info("Updating is_latest_version flag for affected product sets...")
+
+        # 1. Get the set_ids that were part of the current batch
+        cur.execute("SELECT DISTINCT set_id FROM products_staging;")
+        # Use a tuple for the `IN` clause, ensuring it's not empty
+        set_ids_to_update = tuple(row[0] for row in cur.fetchall())
+
+        if not set_ids_to_update:
+            logger.info("No set_ids to update. Skipping version flag update.")
+            return
+
+        q_marks = ",".join("?" * len(set_ids_to_update))
+
+        # 2. Find the document_id of the true latest version for each affected set_id
         cur.execute(
-            "UPDATE products SET is_latest_version = 0 "
-            "WHERE set_id IN (SELECT DISTINCT set_id FROM products_staging);"
+            f"""
+            SELECT document_id FROM (
+                SELECT
+                    document_id,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY set_id
+                        ORDER BY version_number DESC, effective_time DESC
+                    ) as rn
+                FROM products
+                WHERE set_id IN ({q_marks})
+            ) WHERE rn = 1;
+            """,
+            set_ids_to_update,
+        )
+        latest_doc_ids = tuple(row[0] for row in cur.fetchall())
+
+        # 3. Set is_latest_version to 0 for ALL products in the affected sets.
+        # This is a broad reset before the final update.
+        logger.debug(
+            f"Resetting latest_version flag for {len(set_ids_to_update)} sets."
         )
         cur.execute(
-            """
-            UPDATE products SET is_latest_version = 1
-            WHERE document_id IN (
-                SELECT document_id FROM (
-                    SELECT
-                        document_id,
-                        ROW_NUMBER() OVER (
-                            PARTITION BY set_id
-                            ORDER BY version_number DESC, effective_time DESC
-                        ) as rn
-                    FROM products
-                    WHERE set_id IN (SELECT DISTINCT set_id FROM products_staging)
-                ) WHERE rn = 1
-            );
-            """
+            f"UPDATE products SET is_latest_version = 0 WHERE set_id IN ({q_marks});",
+            set_ids_to_update,
         )
+
+        # 4. Set is_latest_version to 1 only for the true latest documents.
+        if latest_doc_ids:
+            latest_doc_q_marks = ",".join("?" * len(latest_doc_ids))
+            logger.debug(
+                f"Setting latest_version flag for {len(latest_doc_ids)} documents."
+            )
+            cur.execute(
+                (
+                    f"UPDATE products SET is_latest_version = 1 "
+                    f"WHERE document_id IN ({latest_doc_q_marks});"
+                ),
+                latest_doc_ids,
+            )
 
     def post_load_cleanup(self, mode: Literal["full-load", "delta-load"]) -> None:
         logger.info("Performing post-load cleanup...")
@@ -224,7 +287,10 @@ class SqliteLoader(DatabaseLoader):
             raise
 
     def start_run(self, mode: Literal["full-load", "delta-load"]) -> int:
-        sql = "INSERT INTO etl_load_history (start_time, status, mode) VALUES (datetime('now'), 'RUNNING', ?);"
+        sql = (
+            "INSERT INTO etl_load_history (start_time, status, mode) "
+            "VALUES (datetime('now'), 'RUNNING', ?);"
+        )
         try:
             with self._get_conn() as conn:
                 cur = conn.cursor()
@@ -239,7 +305,11 @@ class SqliteLoader(DatabaseLoader):
     def end_run(
         self, run_id: int, status: str, records_loaded: int, error_log: str | None
     ) -> None:
-        sql = "UPDATE etl_load_history SET end_time = datetime('now'), status = ?, records_loaded = ?, error_log = ? WHERE run_id = ?;"
+        sql = (
+            "UPDATE etl_load_history SET end_time = datetime('now'), "
+            "status = ?, records_loaded = ?, error_log = ? "
+            "WHERE run_id = ?;"
+        )
         try:
             with self._get_conn() as conn:
                 conn.execute(sql, (status, records_loaded, error_log, run_id))

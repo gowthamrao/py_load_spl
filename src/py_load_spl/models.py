@@ -1,4 +1,4 @@
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from typing import Any
 from uuid import UUID
 
@@ -34,7 +34,7 @@ class Product(BaseModel):
     dosage_form: str | None = Field(default=None)
     route_of_administration: str | None = Field(default=None)
     is_latest_version: bool = Field(default=False)
-    loaded_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    loaded_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     _clean_strings = field_validator(
         "product_name",
@@ -85,7 +85,7 @@ class SplRawDocument(BaseModel):
     effective_time: date
     raw_data: str  # Raw XML/JSON, should not be cleaned
     source_filename: str
-    loaded_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    loaded_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     _clean_source_filename = field_validator("source_filename", mode="before")(
         clean_string
