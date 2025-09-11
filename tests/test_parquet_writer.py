@@ -1,13 +1,67 @@
 import json
 import tempfile
+from datetime import date
 from pathlib import Path
 from uuid import uuid4
 
+import pyarrow as pa
 import pyarrow.parquet as pq
 import xmltodict
 
+from py_load_spl import schemas
 from py_load_spl.models import Product, SplRawDocument
 from py_load_spl.transformation import ParquetWriter
+
+
+def test_parquet_writer_uses_explicit_schema(tmp_path: Path) -> None:
+    """
+    Tests that the ParquetWriter uses the predefined, explicit schema when
+    writing files, ensuring data integrity and correct types.
+    This is the primary test for the changes made to use explicit schemas.
+    """
+    # 1. Arrange
+    writer = ParquetWriter(output_dir=tmp_path)
+    doc_id = uuid4()
+    set_id = uuid4()
+
+    # Create a product instance with all data types to test schema enforcement
+    product = Product(
+        document_id=doc_id,
+        set_id=set_id,
+        version_number=5,
+        effective_time=date(2025, 9, 10),
+        product_name="Schema Test Drug",
+        manufacturer_name="Schema Pharma Inc.",
+        dosage_form="CAPSULE",
+        route_of_administration="ORAL",
+        is_latest_version=True,
+    )
+
+    # 2. Act
+    with writer:
+        writer.write(product)
+
+    # 3. Assert
+    output_file = tmp_path / "products.parquet"
+    assert output_file.exists()
+
+    # Read the table and, most importantly, its schema
+    table = pq.read_table(output_file)
+
+    # Assert that the schema of the written file is exactly what we defined
+    assert table.schema == schemas.PRODUCT_SCHEMA
+
+    # Assert that the data was written correctly and can be read back
+    assert table.num_rows == 1
+    data = table.to_pydict()
+    assert data["document_id"][0] == str(doc_id)
+    assert data["set_id"][0] == str(set_id)
+    assert data["version_number"][0] == 5
+    assert data["effective_time"][0] == date(2025, 9, 10)
+    assert data["product_name"][0] == "Schema Test Drug"
+    assert data["is_latest_version"][0] is True
+    # loaded_at is a datetime, check that it's a valid datetime object
+    assert data["loaded_at"][0] is not None
 
 
 def test_parquet_writer_writes_correct_data():

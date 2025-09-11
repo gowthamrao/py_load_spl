@@ -13,6 +13,7 @@ import pyarrow.parquet as pq
 import xmltodict
 from pydantic import BaseModel
 
+from . import schemas
 from .models import (
     Ingredient,
     MarketingStatus,
@@ -32,6 +33,24 @@ MODEL_TO_FILENAME_MAP: dict[type[BaseModel], str] = {
     MarketingStatus: "marketing_status",
     ProductNdc: "product_ndcs",
     SplRawDocument: "spl_raw_documents",
+}
+
+
+# A mapping from our Pydantic models to their explicit PyArrow schemas.
+MODEL_TO_SCHEMA_MAP: dict[type[BaseModel], pa.Schema] = {
+    Product: schemas.PRODUCT_SCHEMA,
+    Ingredient: schemas.INGREDIENT_SCHEMA,
+    Packaging: schemas.PACKAGING_SCHEMA,
+    MarketingStatus: schemas.MARKETING_STATUS_SCHEMA,
+    ProductNdc: schemas.PRODUCT_NDC_SCHEMA,
+    SplRawDocument: schemas.SPL_RAW_DOCUMENT_SCHEMA,
+}
+
+
+# A reverse mapping from a filename to its PyArrow schema for easy lookup.
+FILENAME_TO_SCHEMA_MAP: dict[str, pa.Schema] = {
+    filename: MODEL_TO_SCHEMA_MAP[model]
+    for model, filename in MODEL_TO_FILENAME_MAP.items()
 }
 
 # --- Writer Abstraction ---
@@ -115,7 +134,6 @@ class ParquetWriter(FileWriter):
         self.batch_size = batch_size
         self._batches: dict[str, list[dict[str, Any]]] = defaultdict(list)
         self._parquet_writers: dict[str, pq.ParquetWriter] = {}
-        self._schemas: dict[str, pa.Schema] = {}
 
     def _open(self) -> None:
         # ParquetWriter instances are created on-the-fly when the first batch for a
@@ -148,7 +166,10 @@ class ParquetWriter(FileWriter):
         return processed_batch
 
     def _flush_batch(self, name: str) -> None:
-        """Writes the current in-memory batch to the corresponding Parquet file."""
+        """
+        Writes the current in-memory batch to the corresponding Parquet file
+        using its predefined, explicit schema.
+        """
         batch = self._batches[name]
         if not batch:
             return
@@ -156,16 +177,21 @@ class ParquetWriter(FileWriter):
         logger.info(f"Flushing batch of {len(batch)} records to {name}.parquet...")
         processed_batch = self._preprocess_batch(batch)
 
-        try:
-            table = pa.Table.from_pylist(
-                processed_batch, schema=self._schemas.get(name)
-            )
+        schema = FILENAME_TO_SCHEMA_MAP.get(name)
+        if not schema:
+            logger.error(f"No schema defined for Parquet file '{name}.parquet'")
+            # Or raise an exception, but logging and skipping is more resilient
+            return
 
+        try:
+            # Create the writer with the explicit schema if it doesn't exist
             if name not in self._parquet_writers:
-                # First time writing to this file, create the writer and store schema
                 filepath = self.output_dir / f"{name}.parquet"
-                self._schemas[name] = table.schema
-                self._parquet_writers[name] = pq.ParquetWriter(filepath, table.schema)
+                self._parquet_writers[name] = pq.ParquetWriter(filepath, schema)
+
+            # Create the Arrow Table using the explicit schema. This is critical
+            # as it enforces the correct data types during table creation.
+            table = pa.Table.from_pylist(processed_batch, schema=schema)
 
             self._parquet_writers[name].write_table(table)
             self._batches[name].clear()
