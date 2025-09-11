@@ -1,5 +1,5 @@
+from collections.abc import Generator
 from datetime import date
-from typing import Generator
 from uuid import uuid4
 
 import psycopg2
@@ -349,7 +349,8 @@ def test_merge_from_staging_delta_load_updates_is_latest_version_flag(
     with conn.cursor() as cur:
         # Check v1: is_latest_version should now be false
         cur.execute(
-            "SELECT is_latest_version FROM products WHERE document_id = %s", (str(v1_doc_id),)
+            "SELECT is_latest_version FROM products WHERE document_id = %s",
+            (str(v1_doc_id),),
         )
         v1_result = cur.fetchone()
         assert v1_result is not None, "v1 product not found after merge"
@@ -357,7 +358,8 @@ def test_merge_from_staging_delta_load_updates_is_latest_version_flag(
 
         # Check v2: is_latest_version should be true
         cur.execute(
-            "SELECT is_latest_version FROM products WHERE document_id = %s", (str(v2_doc_id),)
+            "SELECT is_latest_version FROM products WHERE document_id = %s",
+            (str(v2_doc_id),),
         )
         v2_result = cur.fetchone()
         assert v2_result is not None, "v2 product not found after merge"

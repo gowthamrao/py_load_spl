@@ -28,9 +28,9 @@ class PostgresLoader(DatabaseLoader):
     """
 
     def __init__(self, db_settings: DatabaseSettings) -> None:
-        assert isinstance(
-            db_settings, PostgresSettings
-        ), "PostgresLoader requires a PostgresSettings object"
+        assert isinstance(db_settings, PostgresSettings), (
+            "PostgresLoader requires a PostgresSettings object"
+        )
         self.settings = db_settings
         self.conn: connection | None = None
         # Store definitions of dropped objects (indexes, FKs) to recreate them later

@@ -62,9 +62,13 @@ def parse_spl_file(file_path: Path) -> dict[str, Any]:
         set_id_el = _xp(root, ".//hl7:setId")
         data["set_id"] = set_id_el.get("root") if set_id_el is not None else None
         version_el = _xp(root, ".//hl7:versionNumber")
-        data["version_number"] = int(version_el.get("value", 0)) if version_el is not None else 0
+        data["version_number"] = (
+            int(version_el.get("value", 0)) if version_el is not None else 0
+        )
         effective_time_el = _xp(root, ".//hl7:effectiveTime")
-        data["effective_time"] = effective_time_el.get("value") if effective_time_el is not None else None
+        data["effective_time"] = (
+            effective_time_el.get("value") if effective_time_el is not None else None
+        )
         data["raw_data"] = raw_xml_content
         data["source_filename"] = file_path.name
 

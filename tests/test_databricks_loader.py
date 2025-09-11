@@ -1,6 +1,5 @@
 import unittest
-from pathlib import Path
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 
@@ -126,10 +125,15 @@ def test_etl_tracking(mock_connect, databricks_settings):
     mock_cursor.fetchone.return_value = (123,)
     run_id = loader.start_run("delta-load")
     assert run_id == 123
-    mock_cursor.execute.assert_has_calls([
-        call("INSERT INTO etl_load_history (start_time, status, mode) VALUES (current_timestamp(), 'RUNNING', %s)", ('delta-load',)),
-        call("SELECT MAX(run_id) FROM etl_load_history")
-    ])
+    mock_cursor.execute.assert_has_calls(
+        [
+            call(
+                "INSERT INTO etl_load_history (start_time, status, mode) VALUES (current_timestamp(), 'RUNNING', %s)",
+                ("delta-load",),
+            ),
+            call("SELECT MAX(run_id) FROM etl_load_history"),
+        ]
+    )
 
     # Test end_run
     loader.end_run(123, "SUCCESS", 500, None)

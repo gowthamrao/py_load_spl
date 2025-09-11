@@ -1,8 +1,6 @@
 from pathlib import Path
 
-import pytest
-
-from py_load_spl.parsing import SplParsingError, parse_spl_file
+from py_load_spl.parsing import parse_spl_file
 
 
 def test_parsing_handles_missing_version_number_gracefully(tmp_path: Path):

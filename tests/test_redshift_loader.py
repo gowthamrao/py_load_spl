@@ -287,7 +287,8 @@ def test_etl_tracking_methods(
 def test_connection_error(mocker: MockerFixture, redshift_settings, s3_settings):
     """Tests that a connection error is handled correctly."""
     mocker.patch(
-        "redshift_connector.connect", side_effect=redshift_connector.Error("Connection failed")
+        "redshift_connector.connect",
+        side_effect=redshift_connector.Error("Connection failed"),
     )
     with pytest.raises(redshift_connector.Error):
         loader = RedshiftLoader(redshift_settings, s3_settings)
@@ -316,8 +317,10 @@ def test_bulk_load_copy_failure(
 
     # Create a mock connection object that has a rollback method
     mock_conn_obj = MagicMock(
-        cursor=MagicMock(return_value=MagicMock(__enter__=MagicMock(return_value=mock_cursor))),
-        rollback=MagicMock()
+        cursor=MagicMock(
+            return_value=MagicMock(__enter__=MagicMock(return_value=mock_cursor))
+        ),
+        rollback=MagicMock(),
     )
     # Manually set the .conn attribute on the loader instance so the except block can find it
     redshift_loader.conn = mock_conn_obj

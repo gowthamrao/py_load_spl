@@ -21,9 +21,7 @@ def setup_logging(log_level: str, log_format: str) -> None:
 
     formatter: logging.Formatter
     if log_format.lower() == "json":
-        formatter = JsonFormatter(
-            "%(asctime)s %(name)s %(levelname)s %(message)s"
-        )
+        formatter = JsonFormatter("%(asctime)s %(name)s %(levelname)s %(message)s")
     else:
         formatter = logging.Formatter(
             "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
