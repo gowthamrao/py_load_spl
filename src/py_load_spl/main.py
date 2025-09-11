@@ -1,8 +1,10 @@
 import concurrent.futures
 import logging
 import tempfile
+from collections.abc import Generator
 from concurrent.futures import as_completed
 from pathlib import Path
+from typing import Any
 
 from .acquisition import download_spl_archives
 from .config import DatabricksSettings, RedshiftSettings, Settings
@@ -64,7 +66,7 @@ def _quarantine_and_parse_in_parallel(
     xml_files: list[Path],
     settings: Settings,
     executor: concurrent.futures.ProcessPoolExecutor,
-):
+) -> Generator[dict[str, Any], None, None]:
     """
     Parses a list of XML files in parallel, quarantining any file that fails.
     Yields successfully parsed data dictionaries.
@@ -99,7 +101,7 @@ def _quarantine_and_parse_in_parallel(
         logger.warning(f"Quarantined {quarantined_count} file(s).")
 
 
-def run_full_load(settings: Settings, source: Path):
+def run_full_load(settings: Settings, source: Path) -> None:
     """The core logic for a full data load from a given source directory."""
     logger.info(f"Starting full data load from '{source}'...")
     loader = get_db_loader(settings)
@@ -137,14 +139,29 @@ def run_full_load(settings: Settings, source: Path):
 
             logger.info("Step 3: Loading data into database...")
             loader.pre_load_optimization(mode="full-load")
-            loader.bulk_load_to_staging(output_dir)
+            loaded_count = loader.bulk_load_to_staging(output_dir)
+
+            # F002.1 Data Integrity Validation
+            transformed_count = sum(stats.values())
+            if loaded_count != transformed_count:
+                mismatch_msg = (
+                    f"Data integrity check failed! Transformed records ({transformed_count}) "
+                    f"does not match loaded records ({loaded_count})."
+                )
+                logger.error(mismatch_msg)
+                raise RuntimeError(mismatch_msg)
+            logger.info(
+                "Data integrity check passed: %d transformed, %d loaded.",
+                transformed_count,
+                loaded_count,
+            )
+
             loader.merge_from_staging("full-load")
             loader.post_load_cleanup(mode="full-load")
             logger.info("Database loading complete.")
 
         if run_id:
-            total_records = sum(stats.values()) if stats else 0
-            loader.end_run(run_id, "SUCCESS", total_records, None)
+            loader.end_run(run_id, "SUCCESS", loaded_count, None)
         logger.info("Full load process finished successfully.")
     except Exception as e:
         logger.exception("An error occurred during the full load process")
@@ -153,7 +170,7 @@ def run_full_load(settings: Settings, source: Path):
         raise
 
 
-def run_delta_load(settings: Settings):
+def run_delta_load(settings: Settings) -> None:
     """The core logic for an incremental (delta) load from the FDA source."""
     logger.info("Starting delta data load from FDA source...")
     loader = get_db_loader(settings)
@@ -202,7 +219,23 @@ def run_delta_load(settings: Settings):
 
             logger.info("Step 5: Loading data into database...")
             loader.pre_load_optimization(mode="delta-load")
-            loader.bulk_load_to_staging(intermediate_dir)
+            loaded_count = loader.bulk_load_to_staging(intermediate_dir)
+
+            # F002.1 Data Integrity Validation
+            transformed_count = sum(stats.values())
+            if loaded_count != transformed_count:
+                mismatch_msg = (
+                    f"Data integrity check failed! Transformed records ({transformed_count}) "
+                    f"does not match loaded records ({loaded_count})."
+                )
+                logger.error(mismatch_msg)
+                raise RuntimeError(mismatch_msg)
+            logger.info(
+                "Data integrity check passed: %d transformed, %d loaded.",
+                transformed_count,
+                loaded_count,
+            )
+
             loader.merge_from_staging("delta-load")
             loader.post_load_cleanup(mode="delta-load")
             logger.info("Database loading complete.")
@@ -212,8 +245,7 @@ def run_delta_load(settings: Settings):
                 loader.record_processed_archive(archive.name, archive.checksum)
 
         if run_id:
-            total_records = sum(stats.values()) if stats else 0
-            loader.end_run(run_id, "SUCCESS", total_records, None)
+            loader.end_run(run_id, "SUCCESS", loaded_count, None)
         logger.info("Delta load process finished successfully.")
     except Exception as e:
         logger.exception("Delta load failed")

@@ -16,10 +16,11 @@ class DatabaseLoader(ABC):
         pass
 
     @abstractmethod
-    def bulk_load_to_staging(self, intermediate_dir: Path) -> None:  # pragma: no cover
+    def bulk_load_to_staging(self, intermediate_dir: Path) -> int:  # pragma: no cover
         """
-        Loads the intermediate files into staging tables using native utilities
-        (F006.1, F006.2).
+        Loads intermediate files into staging tables using native utilities.
+
+        :return: The total number of rows loaded into all staging tables.
         """
         pass
 

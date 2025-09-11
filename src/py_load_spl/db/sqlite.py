@@ -85,10 +85,11 @@ class SqliteLoader(DatabaseLoader):
             logger.error(f"SQLite schema initialization failed: {e}", exc_info=True)
             raise
 
-    def bulk_load_to_staging(self, intermediate_dir: Path) -> None:
+    def bulk_load_to_staging(self, intermediate_dir: Path) -> int:
         logger.info(
             f"Bulk loading data from {intermediate_dir} into SQLite staging tables..."
         )
+        total_rows_loaded = 0
         files_to_process = list(intermediate_dir.glob("*.csv")) + list(
             intermediate_dir.glob("*.parquet")
         )
@@ -96,7 +97,7 @@ class SqliteLoader(DatabaseLoader):
             logger.warning(
                 f"No intermediate CSV or Parquet files found in {intermediate_dir}."
             )
-            return
+            return 0
 
         try:
             with self._get_conn() as conn:
@@ -121,31 +122,36 @@ class SqliteLoader(DatabaseLoader):
                             reader = csv.reader(f)
                             for row in reader:
                                 processed_row = tuple(
-                                    # Handle the NULL representation from transformer
-                                    None if cell == "\\N" else cell
-                                    for cell in row
+                                    None if cell == "\\N" else cell for cell in row
                                 )
                                 batch.append(processed_row)
                                 if len(batch) >= batch_size:
                                     cur.executemany(sql, batch)
+                                    total_rows_loaded += cur.rowcount
                                     batch.clear()
                             if batch:
                                 cur.executemany(sql, batch)
+                                total_rows_loaded += cur.rowcount
 
                     elif filepath.suffix == ".parquet":
                         table = pq.read_table(filepath)
-                        # Process in batches to keep memory usage low
                         for batch in table.to_batches(max_chunksize=20000):
-                            # Convert batch to list of tuples for executemany
                             data = list(zip(*batch.to_pydict().values(), strict=False))
                             cur.executemany(sql, data)
+                            total_rows_loaded += cur.rowcount
 
                 conn.commit()
+                logger.info(
+                    "SQLite bulk load complete. Total rows loaded: %d",
+                    total_rows_loaded,
+                )
+                return total_rows_loaded
         except (OSError, sqlite3.Error, pa.ArrowException) as e:
             logger.error(f"SQLite bulk load to staging failed: {e}", exc_info=True)
             if self.conn:
                 self.conn.rollback()
             raise
+        return -1  # Should be unreachable
 
     def pre_load_optimization(self, mode: Literal["full-load", "delta-load"]) -> None:
         if mode == "full-load" and self.settings.optimize_full_load:

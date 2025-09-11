@@ -75,11 +75,17 @@ class RedshiftLoader(DatabaseLoader):
                 self.conn.rollback()
             raise
 
-    def bulk_load_to_staging(self, intermediate_dir: Path) -> None:
-        """Uploads files to S3 and then uses COPY to load into Redshift."""
+    def bulk_load_to_staging(self, intermediate_dir: Path) -> int:
+        """
+        Uploads files to S3 and then uses COPY to load into Redshift.
+
+        :return: The total number of rows loaded.
+        """
         logger.info(
             f"Starting bulk load process for Redshift from {intermediate_dir}..."
         )
+        total_rows_loaded = 0
+
         # Step 1: Upload all intermediate files to S3
         s3_uri = self.s3_uploader.upload_directory(intermediate_dir)
         logger.info(f"Intermediate files uploaded to {s3_uri}.")
@@ -90,7 +96,7 @@ class RedshiftLoader(DatabaseLoader):
 
         if not files_to_process:
             logger.warning(f"No intermediate files found in {intermediate_dir}.")
-            return
+            return 0
 
         # Step 2: Execute COPY command for each file from S3
         try:
@@ -100,17 +106,14 @@ class RedshiftLoader(DatabaseLoader):
                         table_name = f"{filepath.stem}_staging"
                         s3_key = f"{s3_uri}/{filepath.name}"
 
-                        # The transformation step generates headerless CSVs.
                         if filepath.suffix == ".csv":
                             format_options = "FORMAT AS CSV NULL '\\N' QUOTE '\"'"
                         elif filepath.suffix == ".parquet":
-                            # Parquet files are self-describing
                             format_options = "FORMAT AS PARQUET"
                         else:
                             continue
 
                         logger.info(f"Loading {s3_key} into {table_name}...")
-                        # We don't need column specs for Redshift COPY if the file matches the table
                         sql = f"""
                             COPY {table_name}
                             FROM '{s3_key}'
@@ -118,8 +121,13 @@ class RedshiftLoader(DatabaseLoader):
                             {format_options};
                         """
                         cur.execute(sql)
+                        total_rows_loaded += cur.rowcount
+                        logger.info(f"Loaded {cur.rowcount} rows.")
                 conn.commit()
-            logger.info("Bulk load to staging tables from S3 complete.")
+            logger.info(
+                "Bulk load from S3 complete. Total rows loaded: %d", total_rows_loaded
+            )
+            return total_rows_loaded
         except redshift_connector.Error as e:
             logger.error(f"Bulk load to staging failed: {e}", exc_info=True)
             if self.conn:
@@ -161,16 +169,6 @@ class RedshiftLoader(DatabaseLoader):
                         # This is the standard UPSERT pattern for Redshift.
                         for table in tables_in_dependency_order:
                             logger.debug(f"Merging data for {table}...")
-                            pk_column = "document_id"  # Most tables use this
-                            if table in [
-                                "product_ndcs",
-                                "ingredients",
-                                "packaging",
-                                "marketing_status",
-                            ]:
-                                # These are child tables, we replace all children for a given document
-                                pk_column = "document_id"
-
                             # For parent tables, we delete all records that are being updated.
                             # For child tables, we delete all children for the parent documents being updated.
                             if table == "products" or table == "spl_raw_documents":
@@ -239,10 +237,13 @@ class RedshiftLoader(DatabaseLoader):
                     # Redshift does not have a RETURNING clause like Postgres.
                     # We need to get the last generated identity value.
                     cur.execute("SELECT MAX(run_id) FROM etl_load_history;")
-                    run_id = cur.fetchone()[0]
-                conn.commit()
-            logger.info(f"ETL run started with run_id: {run_id}")
-            return run_id
+                    row = cur.fetchone()
+                    if row:
+                        run_id: int = row[0]
+                        conn.commit()
+                        logger.info(f"ETL run started with run_id: {run_id}")
+                        return run_id
+                raise RuntimeError("Could not retrieve run_id after starting run.")
         except redshift_connector.Error as e:
             logger.error(f"Failed to start ETL run: {e}", exc_info=True)
             if self.conn:
