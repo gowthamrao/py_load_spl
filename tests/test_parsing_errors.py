@@ -3,7 +3,7 @@ from pathlib import Path
 from py_load_spl.parsing import parse_spl_file
 
 
-def test_parsing_handles_missing_version_number_gracefully(tmp_path: Path):
+def test_parsing_handles_missing_version_number_gracefully(tmp_path: Path) -> None:
     """
     Tests that the parser gracefully handles a missing <versionNumber> element
     by assigning a default value, rather than raising an error.

@@ -83,7 +83,7 @@ class SplRawDocument(BaseModel):
     set_id: UUID
     version_number: int
     effective_time: date
-    raw_data: str  # Raw XML/JSON, should not be cleaned
+    raw_data: str | None # Raw XML/JSON, should not be cleaned
     source_filename: str
     loaded_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 

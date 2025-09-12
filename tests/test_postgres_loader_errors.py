@@ -1,8 +1,10 @@
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock
 
 import psycopg2
 import pytest
+from pytest_mock import MockerFixture
 
 from py_load_spl.config import DatabaseSettings, PostgresSettings
 from py_load_spl.db.postgres import PostgresLoader
@@ -20,7 +22,9 @@ def db_settings(tmp_path: Path) -> PostgresSettings:
     )
 
 
-def test_get_conn_failure(db_settings: DatabaseSettings, monkeypatch):
+def test_get_conn_failure(
+    db_settings: DatabaseSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Tests that a connection error is properly raised."""
     monkeypatch.setattr(
         psycopg2,
@@ -33,7 +37,9 @@ def test_get_conn_failure(db_settings: DatabaseSettings, monkeypatch):
         loader.initialize_schema()
 
 
-def test_initialize_schema_file_not_found(db_settings: DatabaseSettings, monkeypatch):
+def test_initialize_schema_file_not_found(
+    db_settings: DatabaseSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Tests the case where the schema.sql file is missing."""
     # Mock the path to a non-existent file
     monkeypatch.setattr(
@@ -44,7 +50,9 @@ def test_initialize_schema_file_not_found(db_settings: DatabaseSettings, monkeyp
         loader.initialize_schema()
 
 
-def test_get_processed_archives_db_error(db_settings: DatabaseSettings, monkeypatch):
+def test_get_processed_archives_db_error(
+    db_settings: DatabaseSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Tests that get_processed_archives handles a database error gracefully."""
     mock_conn = MagicMock()
     mock_cursor = MagicMock()
@@ -58,7 +66,9 @@ def test_get_processed_archives_db_error(db_settings: DatabaseSettings, monkeypa
     assert loader.get_processed_archives() == set()
 
 
-def test_record_processed_archive_db_error(db_settings: DatabaseSettings, monkeypatch):
+def test_record_processed_archive_db_error(
+    db_settings: DatabaseSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Tests that record_processed_archive raises an exception on DB error."""
     mock_conn = MagicMock()
     mock_cursor = MagicMock()
@@ -73,8 +83,8 @@ def test_record_processed_archive_db_error(db_settings: DatabaseSettings, monkey
 
 
 def test_bulk_load_staging_file_missing(
-    db_settings: DatabaseSettings, tmp_path: Path, monkeypatch
-):
+    db_settings: DatabaseSettings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Tests that bulk loading skips a missing file without error."""
     # This test only needs to ensure the connection is mocked, as the logic for file checking
     # happens before any cursors are created or used.
@@ -96,7 +106,7 @@ def test_bulk_load_staging_file_missing(
 
 @pytest.fixture
 def loader_with_mock_conn(
-    db_settings: PostgresSettings, monkeypatch
+    db_settings: PostgresSettings, monkeypatch: pytest.MonkeyPatch
 ) -> tuple[PostgresLoader, MagicMock]:
     """
     Provides a PostgresLoader instance where the connection is already mocked.
@@ -153,11 +163,11 @@ def loader_with_mock_conn(
 )
 def test_db_methods_rollback_on_error(
     loader_with_mock_conn: tuple[PostgresLoader, MagicMock],
-    mocker,
+    mocker: MockerFixture,
     method_to_test: str,
-    method_args: list,
+    method_args: list[Any],
     patch_target: str,
-):
+) -> None:
     """
     Tests that various database operations correctly call rollback() on failure.
     This covers the `if self.conn: self.conn.rollback()` lines.
@@ -196,8 +206,10 @@ def test_db_methods_rollback_on_error(
 
 
 def test_post_load_cleanup_exception_handling(
-    loader_with_mock_conn: tuple[PostgresLoader, MagicMock], mocker, caplog
-):
+    loader_with_mock_conn: tuple[PostgresLoader, MagicMock],
+    mocker: MockerFixture,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     """
     Tests that post_load_cleanup correctly logs and re-raises an exception
     that occurs during the cleanup process.

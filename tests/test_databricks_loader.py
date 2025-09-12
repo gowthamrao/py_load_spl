@@ -1,4 +1,5 @@
 import unittest
+from pathlib import Path
 from unittest.mock import MagicMock, call, patch
 
 import pytest
@@ -8,7 +9,7 @@ from py_load_spl.db.databricks import DatabricksLoader
 
 
 @pytest.fixture
-def databricks_settings():
+def databricks_settings() -> DatabricksSettings:
     """Provides a sample DatabricksSettings for testing."""
     return DatabricksSettings(
         adapter="databricks",
@@ -20,7 +21,9 @@ def databricks_settings():
 
 
 @patch("py_load_spl.db.databricks.S3Uploader")
-def test_initialization(mock_s3_uploader, databricks_settings):
+def test_initialization(
+    mock_s3_uploader: MagicMock, databricks_settings: DatabricksSettings
+) -> None:
     """Tests that the loader initializes correctly and parses the S3 path."""
     loader = DatabricksLoader(databricks_settings)
     assert loader is not None
@@ -33,7 +36,9 @@ def test_initialization(mock_s3_uploader, databricks_settings):
 
 
 @patch("py_load_spl.db.databricks.sql.connect")
-def test_initialize_schema(mock_connect, databricks_settings):
+def test_initialize_schema(
+    mock_connect: MagicMock, databricks_settings: DatabricksSettings
+) -> None:
     """Tests that initialize_schema executes all statements from the DDL file."""
     loader = DatabricksLoader(databricks_settings)
     mock_cursor = MagicMock()
@@ -55,8 +60,11 @@ def test_initialize_schema(mock_connect, databricks_settings):
 @patch("py_load_spl.db.databricks.sql.connect")
 @patch("py_load_spl.db.databricks.S3Uploader.upload_directory")
 def test_bulk_load_to_staging_with_chunked_files(
-    mock_upload, mock_connect, databricks_settings, tmp_path
-):
+    mock_upload: MagicMock,
+    mock_connect: MagicMock,
+    databricks_settings: DatabricksSettings,
+    tmp_path: Path,
+) -> None:
     """Tests that bulk_load_to_staging handles multiple chunked files correctly."""
     loader = DatabricksLoader(databricks_settings)
     mock_upload.return_value = "s3://test-bucket/staging"
@@ -85,7 +93,9 @@ def test_bulk_load_to_staging_with_chunked_files(
 
 
 @patch("py_load_spl.db.databricks.sql.connect")
-def test_merge_from_staging_full_load(mock_connect, databricks_settings):
+def test_merge_from_staging_full_load(
+    mock_connect: MagicMock, databricks_settings: DatabricksSettings
+) -> None:
     """Tests the merge_from_staging method in full-load mode."""
     loader = DatabricksLoader(databricks_settings)
     mock_cursor = MagicMock()
@@ -100,7 +110,9 @@ def test_merge_from_staging_full_load(mock_connect, databricks_settings):
 
 
 @patch("py_load_spl.db.databricks.sql.connect")
-def test_merge_from_staging_delta_load(mock_connect, databricks_settings):
+def test_merge_from_staging_delta_load(
+    mock_connect: MagicMock, databricks_settings: DatabricksSettings
+) -> None:
     """Tests the merge_from_staging method in delta-load mode."""
     loader = DatabricksLoader(databricks_settings)
     mock_cursor = MagicMock()
@@ -115,7 +127,9 @@ def test_merge_from_staging_delta_load(mock_connect, databricks_settings):
 
 
 @patch("py_load_spl.db.databricks.sql.connect")
-def test_etl_tracking(mock_connect, databricks_settings):
+def test_etl_tracking(
+    mock_connect: MagicMock, databricks_settings: DatabricksSettings
+) -> None:
     """Tests the ETL tracking methods."""
     loader = DatabricksLoader(databricks_settings)
     mock_cursor = MagicMock()

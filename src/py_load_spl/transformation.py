@@ -93,7 +93,7 @@ class CsvWriter(FileWriter):
 
     def _open(self) -> None:
         self._file_handles: dict[str, IO[str]] = {}
-        self._csv_writers: dict[str, csv.writer] = {}
+        self._csv_writers: dict[str, Any] = {}
         for _, name in MODEL_TO_FILENAME_MAP.items():
             filename = f"{name}.csv"
             filepath = self.output_dir / filename

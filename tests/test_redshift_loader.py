@@ -21,10 +21,34 @@ from py_load_spl.db.redshift import RedshiftLoader
 pytestmark = pytest.mark.integration
 
 
+import os
+import uuid
+from collections.abc import Generator
+from pathlib import Path
+from typing import Any
+from unittest.mock import MagicMock
+
+import boto3
+import psycopg2
+import pytest
+import redshift_connector
+from moto import mock_aws
+from mypy_boto3_s3.client import S3Client
+from pytest_mock import MockerFixture
+from testcontainers.core.wait_strategies import LogMessageWaitStrategy
+from testcontainers.postgres import PostgresContainer
+
+from py_load_spl.config import RedshiftSettings, S3Settings
+from py_load_spl.db.redshift import RedshiftLoader
+
+# Mark all tests in this file as integration tests
+pytestmark = pytest.mark.integration
+
+
 @pytest.fixture(autouse=True)
 def patch_redshift_connector(
     mocker: MockerFixture, postgres_container: PostgresContainer
-):
+) -> None:
     """
     Patches redshift_connector.connect to use psycopg2.connect instead,
     allowing tests to run against a standard Postgres container. This is a
@@ -32,7 +56,7 @@ def patch_redshift_connector(
     Redshift instance for testing.
     """
 
-    def mock_connect(*args, **kwargs):
+    def mock_connect(*args: Any, **kwargs: Any) -> psycopg2.extensions.connection:
         # The RedshiftLoader passes Redshift-specific args; we ignore them
         # and use the connection details from the Postgres container.
         return psycopg2.connect(
@@ -291,7 +315,11 @@ def test_etl_tracking_methods(
     assert "archive1.zip" in processed
 
 
-def test_connection_error(mocker: MockerFixture, redshift_settings, s3_settings):
+def test_connection_error(
+    mocker: MockerFixture,
+    redshift_settings: RedshiftSettings,
+    s3_settings: S3Settings,
+) -> None:
     """Tests that a connection error is handled correctly."""
     mocker.patch(
         "redshift_connector.connect",
@@ -305,7 +333,7 @@ def test_connection_error(mocker: MockerFixture, redshift_settings, s3_settings)
 
 def test_bulk_load_copy_failure(
     redshift_loader: RedshiftLoader, tmp_path: Path, mocker: MockerFixture
-):
+) -> None:
     """Tests failure during the Redshift COPY command."""
     intermediate_dir = tmp_path / "intermediate"
     intermediate_dir.mkdir()
@@ -346,7 +374,9 @@ def test_bulk_load_copy_failure(
     mock_conn_obj.rollback.assert_called_once()
 
 
-def test_post_load_cleanup(redshift_loader: RedshiftLoader, mocker: MockerFixture):
+def test_post_load_cleanup(
+    redshift_loader: RedshiftLoader, mocker: MockerFixture
+) -> None:
     """Tests the post-load cleanup VACUUM/ANALYZE commands."""
     mock_cursor = MagicMock()
     mocker.patch.object(
@@ -375,7 +405,7 @@ def test_post_load_cleanup(redshift_loader: RedshiftLoader, mocker: MockerFixtur
 
 def test_parquet_load_path(
     redshift_loader: RedshiftLoader, tmp_path: Path, mocker: MockerFixture
-):
+) -> None:
     """Tests the code path for loading a Parquet file."""
     intermediate_dir = tmp_path / "intermediate"
     intermediate_dir.mkdir()
@@ -412,7 +442,7 @@ def test_parquet_load_path(
 
 def test_bulk_load_no_files(
     redshift_loader: RedshiftLoader, tmp_path: Path, mocker: MockerFixture
-):
+) -> None:
     """Tests that bulk loading from an empty directory does nothing."""
     intermediate_dir = tmp_path / "intermediate"
     intermediate_dir.mkdir()
@@ -442,7 +472,7 @@ def test_bulk_load_no_files(
 
 def test_initialize_schema_not_found(
     redshift_loader: RedshiftLoader, mocker: MockerFixture, tmp_path: Path
-):
+) -> None:
     """Tests that a FileNotFoundError is raised if the schema DDL is missing."""
     non_existent_path = tmp_path / "non_existent_schema.sql"
     mocker.patch("py_load_spl.db.redshift.SQL_SCHEMA_PATH", non_existent_path)
@@ -451,7 +481,9 @@ def test_initialize_schema_not_found(
         redshift_loader.initialize_schema()
 
 
-def test_start_run_no_run_id(redshift_loader: RedshiftLoader, mocker: MockerFixture):
+def test_start_run_no_run_id(
+    redshift_loader: RedshiftLoader, mocker: MockerFixture
+) -> None:
     """Tests that a RuntimeError is raised if the run_id cannot be fetched."""
     mock_cursor = MagicMock()
     mock_cursor.fetchone.return_value = None  # Simulate not finding the new run_id
@@ -477,7 +509,7 @@ def test_start_run_no_run_id(redshift_loader: RedshiftLoader, mocker: MockerFixt
 
 def test_get_processed_archives_failure(
     redshift_loader: RedshiftLoader, mocker: MockerFixture
-):
+) -> None:
     """Tests that an empty set is returned if fetching archives fails."""
     mock_cursor = MagicMock()
     mock_cursor.execute.side_effect = redshift_connector.Error("Query failed")

@@ -1,4 +1,5 @@
 import uuid
+from datetime import date
 
 import pytest
 
@@ -23,14 +24,14 @@ from py_load_spl.models import (
         (None, None),  # None should remain None
     ],
 )
-def test_clean_string_validator(input_val, expected_val):
+def test_clean_string_validator(input_val: str | None, expected_val: str | None) -> None:
     """
     Tests the reusable clean_string validator directly.
     """
     assert clean_string(input_val) == expected_val
 
 
-def test_product_model_cleaning():
+def test_product_model_cleaning() -> None:
     """
     Tests that the string cleaning validator is correctly applied to the Product model.
     """
@@ -38,7 +39,7 @@ def test_product_model_cleaning():
         document_id=uuid.uuid4(),
         set_id=uuid.uuid4(),
         version_number=1,
-        effective_time="20240101",
+        effective_time=date(2024, 1, 1),
         product_name="  Test Product  ",
         manufacturer_name="   ",  # Should be None
         dosage_form="\tDosage  ",
@@ -50,7 +51,7 @@ def test_product_model_cleaning():
     assert p.route_of_administration is None
 
 
-def test_ingredient_model_cleaning():
+def test_ingredient_model_cleaning() -> None:
     """
     Tests that the string cleaning validator is correctly applied to the Ingredient model.
     """
@@ -70,7 +71,7 @@ def test_ingredient_model_cleaning():
     assert i.unit_of_measure == "mg"
 
 
-def test_packaging_model_cleaning():
+def test_packaging_model_cleaning() -> None:
     """
     Tests that the string cleaning validator is correctly applied to the Packaging model.
     """
@@ -85,19 +86,19 @@ def test_packaging_model_cleaning():
     assert p.package_type is None
 
 
-def test_marketing_status_model_cleaning():
+def test_marketing_status_model_cleaning() -> None:
     """
     Tests that the string cleaning validator is correctly applied to the MarketingStatus model.
     """
     m = MarketingStatus(
         document_id=uuid.uuid4(),
         marketing_category="  Active  ",
-        start_date="20240101",
+        start_date=date(2024, 1, 1),
     )
     assert m.marketing_category == "Active"
 
 
-def test_product_ndc_model_cleaning():
+def test_product_ndc_model_cleaning() -> None:
     """
     Tests that the string cleaning validator is correctly applied to the ProductNdc model.
     """

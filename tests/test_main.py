@@ -1,7 +1,8 @@
 import hashlib
 import zipfile
+from collections.abc import Generator
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import psycopg2
 import pytest
@@ -42,7 +43,9 @@ def source_xml_dir(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def db_settings(monkeypatch: pytest.MonkeyPatch) -> PostgresSettings:
+def db_settings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> Generator[PostgresSettings, None, None]:
     """Spins up a PostgreSQL container and returns the connection settings."""
     container = PostgresContainer("postgres:16-alpine")
     container.waiting_for(
@@ -69,7 +72,9 @@ def db_settings(monkeypatch: pytest.MonkeyPatch) -> PostgresSettings:
 
 
 @pytest.mark.integration
-def test_run_full_load_integration(db_settings: DatabaseSettings, source_xml_dir: Path):
+def test_run_full_load_integration(
+    db_settings: DatabaseSettings, source_xml_dir: Path
+) -> None:
     """
     Tests the run_full_load function directly against a test database.
     """
@@ -106,8 +111,8 @@ HTML_FIXTURE = """
 @pytest.mark.integration
 @patch("py_load_spl.acquisition.get_archive_list")
 def test_run_delta_load_integration(
-    mock_get_archive_list, db_settings: DatabaseSettings, tmp_path: Path
-):
+    mock_get_archive_list: MagicMock, db_settings: DatabaseSettings, tmp_path: Path
+) -> None:
     """
     Tests the run_delta_load function directly, mocking the download part.
     """

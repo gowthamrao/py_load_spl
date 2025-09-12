@@ -3,6 +3,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+from pytest_mock import MockerFixture
 from testcontainers.core.wait_strategies import LogMessageWaitStrategy
 
 from py_load_spl.config import PostgresSettings
@@ -19,12 +20,12 @@ SAMPLE_XML_WITH_ROUTE = """<?xml version="1.0" encoding="UTF-8"?>
   <subject>
     <manufacturedProduct>
       <manufacturedProduct>
-        <name>Jules's Sample Drug</name>
+        <name>Sample Drug</name>
         <formCode code="C42916" displayName="TABLET" />
         <routeCode code="C38288" displayName="ORAL" />
         <asEntityWithGeneric>
           <genericMedicine>
-            <name>JULAMYCIN</name>
+            <name>SAMPLAMYCIN</name>
           </genericMedicine>
         </asEntityWithGeneric>
         <ingredient classCode="ACT">
@@ -33,13 +34,13 @@ SAMPLE_XML_WITH_ROUTE = """<?xml version="1.0" encoding="UTF-8"?>
             <denominator value="1" unit="TABLET" />
           </quantity>
           <ingredientSubstance>
-            <name>JULESTAT</name>
-            <code code="UNII-JULE" displayName="JULESTAT" />
+            <name>SAMPLESTAT</name>
+            <code code="UNII-SAMPLE" displayName="SAMPLESTAT" />
           </ingredientSubstance>
         </ingredient>
       </manufacturedProduct>
       <manufacturer>
-        <name>Jules Pharmaceuticals</name>
+        <name>Sample Pharmaceuticals</name>
       </manufacturer>
     </manufacturedProduct>
   </subject>
@@ -77,7 +78,9 @@ SAMPLE_XML_WITH_ROUTE = """<?xml version="1.0" encoding="UTF-8"?>
 
 
 @patch("py_load_spl.db.postgres.psycopg2")
-def test_full_etl_pipeline_mocked(mock_psycopg2):
+def test_full_etl_pipeline_mocked(
+    mock_psycopg2: MagicMock, mocker: MockerFixture
+) -> None:
     """
     Tests the full ETL pipeline with a mocked database to avoid docker issues.
     Verifies that the correct data is generated and that the loader methods
@@ -110,8 +113,8 @@ def test_full_etl_pipeline_mocked(mock_psycopg2):
         )
         loader = PostgresLoader(db_settings)
         # Since we are testing the pipeline, we need to mock the new methods
-        loader.start_run = MagicMock(return_value=1)
-        loader.end_run = MagicMock()
+        mocker.patch.object(loader, "start_run", return_value=1)
+        mocker.patch.object(loader, "end_run")
 
         # 2. Act: Run the E-T-L process
         # Mimic the parallel execution logic from the CLI
@@ -123,7 +126,9 @@ def test_full_etl_pipeline_mocked(mock_psycopg2):
         stats = transformer.transform_stream(parsed_stream)
 
         # Mock the return value for the new row count feature
-        loader.bulk_load_to_staging = MagicMock(return_value=sum(stats.values()))
+        mocker.patch.object(
+            loader, "bulk_load_to_staging", return_value=sum(stats.values())
+        )
 
         loader.initialize_schema()
         loaded_count = loader.bulk_load_to_staging(output_dir)
@@ -153,16 +158,18 @@ def test_full_etl_pipeline_mocked(mock_psycopg2):
         # Check that initialize_schema was called
         assert mock_cur.execute.call_count > 0
         # Check that bulk_load_to_staging was called
-        loader.bulk_load_to_staging.assert_called_with(output_dir)
+        loader.bulk_load_to_staging.assert_called_with(output_dir)  # type: ignore
         # Check that merge_from_staging was called (via execute)
         # It should truncate tables and then insert into them
         truncate_calls = [
-            call for call in mock_cur.execute.call_args_list if "TRUNCATE" in call[0][0]
+            call
+            for call in mock_cur.execute.call_args_list
+            if "TRUNCATE" in call.args[0]
         ]
         insert_calls = [
             call
             for call in mock_cur.execute.call_args_list
-            if "INSERT INTO" in call[0][0]
+            if "INSERT INTO" in call.args[0]
         ]
         assert len(truncate_calls) > 0
         assert len(insert_calls) > 0
@@ -174,8 +181,11 @@ def test_full_etl_pipeline_mocked(mock_psycopg2):
 @patch("py_load_spl.main.Transformer")
 @patch("py_load_spl.main.concurrent.futures.ProcessPoolExecutor")
 def test_record_count_validation(
-    mock_executor, mock_transformer, mock_writer_getter, mock_loader_getter
-):
+    mock_executor: MagicMock,
+    mock_transformer: MagicMock,
+    mock_writer_getter: MagicMock,
+    mock_loader_getter: MagicMock,
+) -> None:
     """
     Unit test for the record count validation logic in `run_full_load`.
     """
@@ -227,7 +237,9 @@ def test_record_count_validation(
 
 
 @pytest.mark.integration
-def test_full_load_pipeline_with_postgres_container(monkeypatch):
+def test_full_load_pipeline_with_postgres_container(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """
     A true end-to-end integration test for the 'full-load' command.
     - Spins up a real PostgreSQL database in a Docker container.
@@ -297,18 +309,23 @@ def test_full_load_pipeline_with_postgres_container(monkeypatch):
 
             # Check products table
             cur.execute("SELECT COUNT(*) FROM products;")
-            assert cur.fetchone()[0] == 1
+            count_result = cur.fetchone()
+            assert count_result is not None
+            assert count_result[0] == 1
             cur.execute(
                 "SELECT product_name, dosage_form, route_of_administration FROM products;"
             )
             product_row = cur.fetchone()
-            assert product_row[0] == "Jules's Sample Drug"
+            assert product_row is not None
+            assert product_row[0] == "Sample Drug"
             assert product_row[1] == "TABLET"
             assert product_row[2] == "ORAL"
 
             # Check spl_raw_documents table
             cur.execute("SELECT COUNT(*) FROM spl_raw_documents;")
-            assert cur.fetchone()[0] == 1
+            count_result = cur.fetchone()
+            assert count_result is not None
+            assert count_result[0] == 1
 
             cur.close()
             conn.close()

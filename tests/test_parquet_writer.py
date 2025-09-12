@@ -63,7 +63,7 @@ def test_parquet_writer_uses_explicit_schema(tmp_path: Path) -> None:
     assert data["loaded_at"][0] is not None
 
 
-def test_parquet_writer_writes_correct_data():
+def test_parquet_writer_writes_correct_data() -> None:
     """
     Tests that ParquetWriter correctly writes different models to separate files
     and handles data types like UUID and nested JSON correctly.
@@ -78,7 +78,7 @@ def test_parquet_writer_writes_correct_data():
             document_id=doc_id_1,
             set_id=uuid4(),
             version_number=1,
-            effective_time="20250909",
+            effective_time=date(2025, 9, 9),
             product_name="Test Drug 1",
             manufacturer_name="Test Pharma",
             is_latest_version=True,
@@ -89,7 +89,7 @@ def test_parquet_writer_writes_correct_data():
             document_id=doc_id_2,
             set_id=uuid4(),
             version_number=2,
-            effective_time="20250910",
+            effective_time=date(2025, 9, 10),
             raw_data="<section><title>Warnings</title><text>May cause drowsiness.</text></section>",
             source_filename="test.zip/test.xml",
         )
