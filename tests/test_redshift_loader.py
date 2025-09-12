@@ -11,6 +11,7 @@ import redshift_connector
 from moto import mock_aws
 from mypy_boto3_s3.client import S3Client
 from pytest_mock import MockerFixture
+from testcontainers.core.wait_strategies import LogMessageWaitStrategy
 from testcontainers.postgres import PostgresContainer
 
 from py_load_spl.config import RedshiftSettings, S3Settings
@@ -77,8 +78,14 @@ def s3_bucket(s3_client: S3Client, s3_bucket_name: str) -> Generator[None, None,
 @pytest.fixture(scope="module")
 def postgres_container() -> Generator[PostgresContainer, None, None]:
     """Starts a PostgreSQL container to act as a Redshift stand-in."""
-    with PostgresContainer("postgres:13") as container:
-        yield container
+    container = PostgresContainer("postgres:13")
+    container.waiting_for(
+        LogMessageWaitStrategy(
+            "database system is ready to accept connections", times=1
+        )
+    )
+    with container as postgres:
+        yield postgres
 
 
 @pytest.fixture(scope="module")

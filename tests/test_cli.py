@@ -6,6 +6,7 @@ from pathlib import Path
 import psycopg2
 import pytest
 import requests_mock
+from testcontainers.core.wait_strategies import LogMessageWaitStrategy
 from testcontainers.postgres import PostgresContainer
 from typer.testing import CliRunner
 
@@ -27,7 +28,13 @@ def test_init_command(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     Test the 'init' command runs without errors against a test container.
     """
-    with PostgresContainer("postgres:16-alpine") as postgres:
+    container = PostgresContainer("postgres:16-alpine")
+    container.waiting_for(
+        LogMessageWaitStrategy(
+            "database system is ready to accept connections", times=1
+        )
+    )
+    with container as postgres:
         # Create a settings object with the dynamic details from the container
         test_db_settings = PostgresSettings(
             host=postgres.get_container_host_ip(),
@@ -215,7 +222,13 @@ def test_delta_load_end_to_end(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     mock_checksum = hashlib.md5(mock_content).hexdigest()
 
     # 2. Set up the test container and settings
-    with PostgresContainer("postgres:16-alpine") as postgres:
+    container = PostgresContainer("postgres:16-alpine")
+    container.waiting_for(
+        LogMessageWaitStrategy(
+            "database system is ready to accept connections", times=1
+        )
+    )
+    with container as postgres:
         test_db_settings = PostgresSettings(
             host=postgres.get_container_host_ip(),
             port=postgres.get_exposed_port(5432),

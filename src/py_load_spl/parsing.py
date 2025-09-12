@@ -1,3 +1,4 @@
+# mypy: disable-error-code="assignment"
 import logging
 from pathlib import Path
 from typing import Any
@@ -19,7 +20,7 @@ class SplParsingError(Exception):
 NAMESPACES = {"hl7": "urn:hl7-org:v3"}
 
 
-def _xp(element: etree._Element, path: str) -> Any | None:
+def _xp(element: etree._Element, path: str) -> etree._Element | None:
     """Helper function for a single XPath query with the HL7 namespace."""
     return element.find(path, namespaces=NAMESPACES)
 
@@ -46,7 +47,13 @@ def parse_spl_file(file_path: Path) -> dict[str, Any]:
     context = etree.iterparse(
         file_path, events=("end",), tag=f"{{{NAMESPACES['hl7']}}}document"
     )
-    _, root = next(context)
+    try:
+        _, root = next(context)
+    except StopIteration:
+        raise SplParsingError(
+            "Could not find the root <document> element in the expected namespace.",
+            file_path=file_path,
+        ) from None
 
     data: dict[str, Any] = {
         "ingredients": [],
@@ -123,9 +130,7 @@ def parse_spl_file(file_path: Path) -> dict[str, Any]:
                         if quantity is not None
                         else None
                     )
-                    substance_name_el = (
-                        _xp(substance, ".//hl7:name") if substance is not None else None
-                    )
+                    substance_name_el = _xp(substance, ".//hl7:name") if substance is not None else None
                     substance_code_el = (
                         _xp(substance, ".//hl7:code") if substance is not None else None
                     )

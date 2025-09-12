@@ -7,3 +7,6 @@ __pycache__/
 
 # Ignore data files
 data/
+
+# Coverage reports
+.coverage
