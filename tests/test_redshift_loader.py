@@ -290,8 +290,8 @@ def test_connection_error(mocker: MockerFixture, redshift_settings, s3_settings)
         "redshift_connector.connect",
         side_effect=redshift_connector.Error("Connection failed"),
     )
-    with pytest.raises(redshift_connector.Error):
-        loader = RedshiftLoader(redshift_settings, s3_settings)
+    loader = RedshiftLoader(redshift_settings, s3_settings)
+    with pytest.raises(redshift_connector.Error, match="Connection failed"):
         with loader._get_conn():
             pass  # This should fail
 
@@ -401,3 +401,94 @@ def test_parquet_load_path(
     assert mock_cursor.execute.call_count == 1
     sql_command = mock_cursor.execute.call_args[0][0]
     assert "FORMAT AS PARQUET" in sql_command
+
+
+def test_bulk_load_no_files(
+    redshift_loader: RedshiftLoader, tmp_path: Path, mocker: MockerFixture
+):
+    """Tests that bulk loading from an empty directory does nothing."""
+    intermediate_dir = tmp_path / "intermediate"
+    intermediate_dir.mkdir()
+
+    mock_cursor = MagicMock()
+    mocker.patch.object(
+        redshift_loader,
+        "_get_conn",
+        return_value=mocker.MagicMock(
+            __enter__=mocker.MagicMock(
+                return_value=mocker.MagicMock(
+                    cursor=mocker.MagicMock(
+                        return_value=mocker.MagicMock(
+                            __enter__=mocker.MagicMock(return_value=mock_cursor)
+                        )
+                    )
+                )
+            )
+        ),
+    )
+
+    rows_loaded = redshift_loader.bulk_load_to_staging(intermediate_dir)
+
+    assert rows_loaded == 0
+    mock_cursor.execute.assert_not_called()
+
+
+def test_initialize_schema_not_found(
+    redshift_loader: RedshiftLoader, mocker: MockerFixture, tmp_path: Path
+):
+    """Tests that a FileNotFoundError is raised if the schema DDL is missing."""
+    non_existent_path = tmp_path / "non_existent_schema.sql"
+    mocker.patch("py_load_spl.db.redshift.SQL_SCHEMA_PATH", non_existent_path)
+
+    with pytest.raises(FileNotFoundError):
+        redshift_loader.initialize_schema()
+
+
+def test_start_run_no_run_id(redshift_loader: RedshiftLoader, mocker: MockerFixture):
+    """Tests that a RuntimeError is raised if the run_id cannot be fetched."""
+    mock_cursor = MagicMock()
+    mock_cursor.fetchone.return_value = None  # Simulate not finding the new run_id
+    mocker.patch.object(
+        redshift_loader,
+        "_get_conn",
+        return_value=mocker.MagicMock(
+            __enter__=mocker.MagicMock(
+                return_value=mocker.MagicMock(
+                    cursor=mocker.MagicMock(
+                        return_value=mocker.MagicMock(
+                            __enter__=mocker.MagicMock(return_value=mock_cursor)
+                        )
+                    )
+                )
+            )
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="Could not retrieve run_id"):
+        redshift_loader.start_run("full-load")
+
+
+def test_get_processed_archives_failure(
+    redshift_loader: RedshiftLoader, mocker: MockerFixture
+):
+    """Tests that an empty set is returned if fetching archives fails."""
+    mock_cursor = MagicMock()
+    mock_cursor.execute.side_effect = redshift_connector.Error("Query failed")
+    mocker.patch.object(
+        redshift_loader,
+        "_get_conn",
+        return_value=mocker.MagicMock(
+            __enter__=mocker.MagicMock(
+                return_value=mocker.MagicMock(
+                    cursor=mocker.MagicMock(
+                        return_value=mocker.MagicMock(
+                            __enter__=mocker.MagicMock(return_value=mock_cursor)
+                        )
+                    )
+                )
+            )
+        ),
+    )
+
+    result = redshift_loader.get_processed_archives()
+    assert result == set()
