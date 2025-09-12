@@ -4,6 +4,7 @@ from uuid import uuid4
 
 import psycopg2
 import pytest
+from testcontainers.core.wait_strategies import LogMessageWaitStrategy
 from testcontainers.postgres import PostgresContainer
 
 from py_load_spl.config import PostgresSettings
@@ -19,7 +20,13 @@ def postgres_loader() -> Generator[PostgresLoader, None, None]:
     Spins up a PostgreSQL container and yields a PostgresLoader instance
     configured to connect to it.
     """
-    with PostgresContainer("postgres:16-alpine") as postgres:
+    container = PostgresContainer("postgres:16-alpine")
+    container.waiting_for(
+        LogMessageWaitStrategy(
+            "database system is ready to accept connections", times=1
+        )
+    )
+    with container as postgres:
         db_settings = PostgresSettings(
             host=postgres.get_container_host_ip(),
             port=postgres.get_exposed_port(5432),

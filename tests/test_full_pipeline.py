@@ -3,6 +3,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+from testcontainers.core.wait_strategies import LogMessageWaitStrategy
 
 from py_load_spl.config import PostgresSettings
 from py_load_spl.db.postgres import PostgresLoader
@@ -242,7 +243,13 @@ def test_full_load_pipeline_with_postgres_container(monkeypatch):
 
     runner = CliRunner()
 
-    with PostgresContainer("postgres:15-alpine") as postgres_container:
+    container = PostgresContainer("postgres:15-alpine")
+    container.waiting_for(
+        LogMessageWaitStrategy(
+            "database system is ready to accept connections", times=1
+        )
+    )
+    with container as postgres_container:
         # Get connection details from the container
         db_settings = postgres_container.get_connection_url()
         db_name = db_settings.split("/")[-1]

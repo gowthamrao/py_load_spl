@@ -1,5 +1,6 @@
 import psycopg2
 import pytest
+from testcontainers.core.wait_strategies import LogMessageWaitStrategy
 from testcontainers.postgres import PostgresContainer
 
 from py_load_spl.config import DatabaseSettings, PostgresSettings
@@ -12,7 +13,13 @@ pytestmark = pytest.mark.integration
 @pytest.fixture(scope="module")
 def postgres_container():
     """Spins up a PostgreSQL container for the module."""
-    with PostgresContainer("postgres:16-alpine") as postgres:
+    container = PostgresContainer("postgres:16-alpine")
+    container.waiting_for(
+        LogMessageWaitStrategy(
+            "database system is ready to accept connections", times=1
+        )
+    )
+    with container as postgres:
         yield postgres
 
 

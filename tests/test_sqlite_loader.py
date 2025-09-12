@@ -1,3 +1,4 @@
+import logging
 import sqlite3
 from collections.abc import Generator
 from pathlib import Path
@@ -7,8 +8,9 @@ from uuid import uuid4
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
+from pytest_mock import MockerFixture
 
-from py_load_spl.config import SqliteSettings
+from py_load_spl.config import PostgresSettings, SqliteSettings
 from py_load_spl.db.sqlite import SqliteLoader
 
 # Mark all tests in this file as integration tests
@@ -347,3 +349,122 @@ def test_merge_from_staging_rolls_back_on_integrity_error(
             "SELECT count(*) FROM spl_raw_documents"
         ).fetchone()[0]
         assert raw_doc_count == 0
+
+
+def test_loader_requires_sqlite_settings() -> None:
+    """Verify that the loader raises an error with incorrect settings."""
+    # Create a valid, but incorrect, settings object
+    wrong_settings = PostgresSettings(
+        name="test", user="test", password="test", host="localhost", port=5432
+    )
+    with pytest.raises(
+        AssertionError, match="SqliteLoader requires a SqliteSettings object"
+    ):
+        SqliteLoader(wrong_settings)
+
+
+def test_bulk_load_handles_empty_directory(
+    sqlite_loader: SqliteLoader, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Verify a warning is logged when the intermediate directory is empty."""
+    intermediate_dir = tmp_path / "intermediate"
+    intermediate_dir.mkdir()
+    with caplog.at_level(logging.WARNING):
+        rows_loaded = sqlite_loader.bulk_load_to_staging(intermediate_dir)
+    assert rows_loaded == 0
+    assert "No intermediate CSV or Parquet files found" in caplog.text
+
+
+def test_bulk_load_skips_unknown_files(
+    sqlite_loader: SqliteLoader, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Verify a warning is logged for files that don't map to a table."""
+    intermediate_dir = tmp_path / "intermediate"
+    intermediate_dir.mkdir()
+    (intermediate_dir / "spl_raw_documents.csv").write_text("doc1,set1,,,,,\n")
+    (intermediate_dir / "unknown_file.csv").write_text("some,data\n")
+    with caplog.at_level(logging.WARNING):
+        rows_loaded = sqlite_loader.bulk_load_to_staging(intermediate_dir)
+    assert rows_loaded > 0  # spl_raw_documents should be loaded
+    assert "No column mapping for unknown_file_staging, skipping" in caplog.text
+
+
+def test_bulk_load_handles_corrupt_parquet_file(
+    sqlite_loader: SqliteLoader, tmp_path: Path
+) -> None:
+    """Verify that a corrupt Parquet file raises an ArrowException."""
+    intermediate_dir = tmp_path / "intermediate"
+    intermediate_dir.mkdir()
+    # Create a valid file to ensure the process starts
+    (intermediate_dir / "products.csv").write_text(
+        "doc1,set1,1,2025-01-01,Product A,Pfizer,Tablet,Oral,1,2025-01-01T12:00:00\n"
+    )
+    # Create a file that is not a valid Parquet file
+    (intermediate_dir / "ingredients.parquet").write_text("this is not parquet")
+
+    with pytest.raises(pa.ArrowException):
+        sqlite_loader.bulk_load_to_staging(intermediate_dir)
+
+    # Verify rollback by checking that the valid data was not committed
+    with sqlite_loader._get_conn() as conn:
+        product_count = conn.execute(
+            "SELECT count(*) FROM products_staging"
+        ).fetchone()[0]
+        assert product_count == 0
+
+
+def test_update_latest_version_flag_with_no_updates(
+    sqlite_loader: SqliteLoader, mocker: MockerFixture, caplog: pytest.LogCaptureFixture
+) -> None:
+    """
+    Test that update_latest_version_flag handles cases where no set_ids
+    need updating (e.g., a delta load with all new products).
+    """
+    # Create a mock cursor that will return no set_ids from the staging table
+    mock_cursor = mocker.MagicMock(spec=sqlite3.Cursor)
+    mock_cursor.fetchall.return_value = []
+
+    with caplog.at_level(logging.INFO):
+        sqlite_loader.update_latest_version_flag(mock_cursor)
+
+    # Check that the function correctly identified no updates were needed and exited
+    assert "No set_ids to update. Skipping version flag update." in caplog.text
+
+    # Check that `execute` was called once to get the set_ids, and that's it
+    mock_cursor.execute.assert_called_once_with(
+        "SELECT DISTINCT set_id FROM products_staging;"
+    )
+    # fetchall should have been called right after to get the (empty) result
+    mock_cursor.fetchall.assert_called_once()
+
+
+def test_error_handling_in_etl_tracking(
+    sqlite_loader: SqliteLoader, mocker: MockerFixture
+) -> None:
+    """Test that `sqlite3.Error` is handled gracefully in ETL tracking methods."""
+    # Patch the connection to raise an error on execute
+    mocker.patch("sqlite3.connect", side_effect=sqlite3.Error)
+    sqlite_loader.conn = None  # Reset connection to force a new one
+
+    with pytest.raises(sqlite3.Error):
+        sqlite_loader.start_run(mode="full-load")
+    with pytest.raises(sqlite3.Error):
+        sqlite_loader.end_run(1, "FAILED", 0, "error")
+    with pytest.raises(sqlite3.Error):
+        sqlite_loader.record_processed_archive("file.zip", "checksum")
+
+    # get_processed_archives should catch the error and return an empty set
+    assert sqlite_loader.get_processed_archives() == set()
+
+    # Restore the original connection method
+    mocker.stopall()
+
+
+def test_initialize_schema_file_not_found(
+    db_settings: SqliteSettings, mocker: MockerFixture
+) -> None:
+    """Test FileNotFoundError is raised if the schema file is missing."""
+    mocker.patch("pathlib.Path.exists", return_value=False)
+    loader = SqliteLoader(db_settings)
+    with pytest.raises(FileNotFoundError):
+        loader.initialize_schema()
