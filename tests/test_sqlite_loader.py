@@ -1,5 +1,6 @@
 from collections.abc import Generator
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 import pyarrow as pa
@@ -94,9 +95,6 @@ def test_bulk_and_full_merge(sqlite_loader: SqliteLoader, tmp_path: Path) -> Non
             "SELECT product_name FROM products WHERE document_id = 'doc1'"
         ).fetchone()
         assert res[0] == "Product A"
-
-
-from typing import Any
 
 
 def _create_intermediate_files(

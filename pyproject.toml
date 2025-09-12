@@ -33,7 +33,7 @@ py-load-spl = "py_load_spl.cli:app"
 [tool.ruff]
 line-length = 88
 select = ["E", "F", "I", "B", "C4", "UP"]
-ignore = []
+ignore = ["E501"]
 
 [tool.black]
 line-length = 88

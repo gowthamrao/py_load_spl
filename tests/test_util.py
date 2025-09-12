@@ -4,7 +4,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
-from pythonjsonlogger import jsonlogger
+from pythonjsonlogger.json import JsonFormatter
 
 from py_load_spl.util import setup_logging, unzip_archive
 
@@ -47,7 +47,7 @@ def test_unzip_archive_file_not_found(tmp_path: Path):
 @pytest.mark.parametrize(
     "log_format, formatter_class",
     [
-        ("json", jsonlogger.JsonFormatter),
+        ("json", JsonFormatter),
         ("text", logging.Formatter),
         ("TEXT", logging.Formatter),  # Test case-insensitivity
     ],

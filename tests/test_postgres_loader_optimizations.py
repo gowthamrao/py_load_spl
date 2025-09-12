@@ -2,7 +2,7 @@ import psycopg2
 import pytest
 from testcontainers.postgres import PostgresContainer
 
-from py_load_spl.config import DatabaseSettings
+from py_load_spl.config import DatabaseSettings, PostgresSettings
 from py_load_spl.db.postgres import PostgresLoader
 
 # Mark all tests in this file as integration tests
@@ -14,9 +14,6 @@ def postgres_container():
     """Spins up a PostgreSQL container for the module."""
     with PostgresContainer("postgres:16-alpine") as postgres:
         yield postgres
-
-
-from py_load_spl.config import PostgresSettings
 
 
 @pytest.fixture
