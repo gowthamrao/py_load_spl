@@ -1,10 +1,11 @@
 from pathlib import Path
+from typing import Any
 
 import pytest
 from typer.testing import CliRunner
 
 from py_load_spl.cli import app
-from py_load_spl.config import Settings
+from py_load_spl.config import DatabaseSettings, Settings
 
 runner = CliRunner()
 
@@ -39,16 +40,16 @@ SAMPLE_XML_CONTENT_BAD = """<?xml version="1.0" encoding="UTF-8"?>
 class MockLoader:
     """A mock loader that does nothing but allows the CLI to run."""
 
-    def __init__(self, db_settings):
+    def __init__(self, db_settings: DatabaseSettings) -> None:
         pass
 
-    def start_run(self, mode):
+    def start_run(self, mode: str) -> int:
         return 1
 
-    def end_run(self, *args, **kwargs):
+    def end_run(self, *args: Any, **kwargs: Any) -> None:
         pass
 
-    def pre_load_optimization(self, mode):
+    def pre_load_optimization(self, mode: str) -> None:
         pass
 
     def bulk_load_to_staging(self, intermediate_dir: Path) -> int:
@@ -62,22 +63,25 @@ class MockLoader:
                 total_rows += sum(1 for line in f)
         return total_rows
 
-    def merge_from_staging(self, mode):
+    def merge_from_staging(self, mode: str) -> None:
         pass
 
-    def post_load_cleanup(self, mode):
+    def post_load_cleanup(self, mode: str) -> None:
         pass
 
 
 @pytest.fixture
-def mock_db_and_settings(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+def mock_db_and_settings(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> Settings:
     """Mocks the DB loader and overrides settings for the test."""
     quarantine_dir = tmp_path / "quarantine"
     test_settings = Settings(quarantine_path=str(quarantine_dir))
 
     monkeypatch.setattr("py_load_spl.cli.get_settings", lambda: test_settings)
     monkeypatch.setattr(
-        "py_load_spl.main.get_db_loader", lambda settings: MockLoader(settings)
+        "py_load_spl.main.get_db_loader",
+        lambda settings: MockLoader(settings.db),
     )
     return test_settings
 
@@ -85,7 +89,7 @@ def mock_db_and_settings(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
 def test_full_load_quarantines_bad_xml(
     tmp_path: Path,
     mock_db_and_settings: Settings,
-):
+) -> None:
     """
     Tests that the full-load command correctly identifies a malformed XML file,
     moves it to the quarantine directory, and successfully processes the good file.

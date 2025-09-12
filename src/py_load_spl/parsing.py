@@ -130,7 +130,9 @@ def parse_spl_file(file_path: Path) -> dict[str, Any]:
                         if quantity is not None
                         else None
                     )
-                    substance_name_el = _xp(substance, ".//hl7:name") if substance is not None else None
+                    substance_name_el = (
+                        _xp(substance, ".//hl7:name") if substance is not None else None
+                    )
                     substance_code_el = (
                         _xp(substance, ".//hl7:code") if substance is not None else None
                     )

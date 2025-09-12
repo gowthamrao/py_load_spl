@@ -10,8 +10,11 @@ from py_load_spl.db.postgres import PostgresLoader
 pytestmark = pytest.mark.integration
 
 
+from collections.abc import Generator
+
+
 @pytest.fixture(scope="module")
-def postgres_container():
+def postgres_container() -> Generator[PostgresContainer, None, None]:
     """Spins up a PostgreSQL container for the module."""
     container = PostgresContainer("postgres:16-alpine")
     container.waiting_for(
@@ -21,6 +24,9 @@ def postgres_container():
     )
     with container as postgres:
         yield postgres
+
+
+from pytest_mock import MockerFixture
 
 
 @pytest.fixture
@@ -77,7 +83,7 @@ def get_db_objects(loader: PostgresLoader) -> tuple[set[str], set[str]]:
     return fks, indexes
 
 
-def test_full_load_optimization_lifecycle(loader: PostgresLoader):
+def test_full_load_optimization_lifecycle(loader: PostgresLoader) -> None:
     """
     Tests that indexes/FKs are correctly dropped and recreated during a full-load.
     """
@@ -111,7 +117,7 @@ def test_full_load_optimization_lifecycle(loader: PostgresLoader):
     assert final_indexes == initial_indexes
 
 
-def test_optimizations_skipped_for_delta_load(loader: PostgresLoader):
+def test_optimizations_skipped_for_delta_load(loader: PostgresLoader) -> None:
     """
     Tests that the optimization steps are skipped for a delta-load.
     """
@@ -138,7 +144,7 @@ def test_optimizations_skipped_for_delta_load(loader: PostgresLoader):
     assert indexes_after_post == initial_indexes
 
 
-def test_optimizations_skipped_if_disabled(db_settings: DatabaseSettings):
+def test_optimizations_skipped_if_disabled(db_settings: DatabaseSettings) -> None:
     """
     Tests that optimizations are skipped if the config flag is False, even for a full-load.
     """
@@ -157,7 +163,7 @@ def test_optimizations_skipped_if_disabled(db_settings: DatabaseSettings):
     assert indexes_after_drop == initial_indexes
 
 
-def test_get_and_recreate_optimizable_objects(loader: PostgresLoader):
+def test_get_and_recreate_optimizable_objects(loader: PostgresLoader) -> None:
     """
     Directly tests the _get_optimizable_objects, _drop_optimizations,
     and _recreate_optimizations methods to ensure they are working.
@@ -202,7 +208,9 @@ def test_get_and_recreate_optimizable_objects(loader: PostgresLoader):
     assert "my_special_test_idx" in final_indexes
 
 
-def test_pre_load_optimization_rollback_on_error(db_settings, mocker):
+def test_pre_load_optimization_rollback_on_error(
+    db_settings: DatabaseSettings, mocker: MockerFixture
+) -> None:
     """
     Covers the error handling block in pre_load_optimization using a mocked connection.
     """

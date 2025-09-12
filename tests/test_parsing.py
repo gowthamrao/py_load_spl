@@ -17,11 +17,11 @@ def sample_spl_file(tmp_path: Path) -> Path:
   <subject>
     <manufacturedProduct>
       <manufacturedProduct>
-        <name>Jules's Sample Drug</name>
+        <name>Sample Drug</name>
         <formCode code="C42916" displayName="TABLET" />
         <asEntityWithGeneric>
           <genericMedicine>
-            <name>JULAMYCIN</name>
+            <name>SAMPLAMYCIN</name>
           </genericMedicine>
         </asEntityWithGeneric>
         <asEquivalentEntity>
@@ -33,13 +33,13 @@ def sample_spl_file(tmp_path: Path) -> Path:
             <denominator value="1" unit="TABLET" />
           </quantity>
           <ingredientSubstance>
-            <name>JULESTAT</name>
-            <code code="UNII-JULE" displayName="JULESTAT" />
+            <name>SAMPLESTAT</name>
+            <code code="UNII-SAMPLE" displayName="SAMPLESTAT" />
           </ingredientSubstance>
         </ingredient>
       </manufacturedProduct>
       <manufacturer>
-        <name>Jules Pharmaceuticals</name>
+        <name>Sample Pharmaceuticals</name>
       </manufacturer>
     </manufacturedProduct>
   </subject>
@@ -79,7 +79,7 @@ def sample_spl_file(tmp_path: Path) -> Path:
     return file_path
 
 
-def test_parse_spl_file(sample_spl_file: Path):
+def test_parse_spl_file(sample_spl_file: Path) -> None:
     """
     Tests the happy path for parsing a well-formed SPL file.
     """
@@ -92,15 +92,15 @@ def test_parse_spl_file(sample_spl_file: Path):
     assert data["effective_time"] == "20250907"
 
     # Assert product details
-    assert data["product_name"] == "Jules's Sample Drug"
-    assert data["manufacturer_name"] == "Jules Pharmaceuticals"
+    assert data["product_name"] == "Sample Drug"
+    assert data["manufacturer_name"] == "Sample Pharmaceuticals"
     assert data["dosage_form"] == "TABLET"
 
     # Assert ingredients
     assert len(data["ingredients"]) == 1
     ingredient = data["ingredients"][0]
-    assert ingredient["ingredient_name"] == "JULESTAT"
-    assert ingredient["substance_code"] == "UNII-JULE"
+    assert ingredient["ingredient_name"] == "SAMPLESTAT"
+    assert ingredient["substance_code"] == "UNII-SAMPLE"
     assert ingredient["is_active_ingredient"] is True
     assert ingredient["strength_numerator"] == "100"
     assert ingredient["strength_denominator"] == "1"
@@ -166,7 +166,7 @@ def spl_file_with_multiple_statuses(tmp_path: Path) -> Path:
     return file_path
 
 
-def test_parsing_multiple_marketing_statuses(spl_file_with_multiple_statuses: Path):
+def test_parsing_multiple_marketing_statuses(spl_file_with_multiple_statuses: Path) -> None:
     """
     Tests that the parser correctly extracts multiple marketing status entries,
     including those with and without an end date.

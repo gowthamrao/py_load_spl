@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+import requests_mock
 from typer.testing import CliRunner
 
 from py_load_spl.cli import app
@@ -15,7 +16,7 @@ runner = CliRunner()
 
 # Create a dummy zip file in memory
 @pytest.fixture(scope="session")
-def dummy_zip_content():
+def dummy_zip_content() -> bytes:
     zip_buffer = BytesIO()
     with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED, False) as zf:
         zf.writestr("test.xml", "<root>test</root>")
@@ -24,14 +25,16 @@ def dummy_zip_content():
 
 
 @pytest.fixture(scope="session")
-def dummy_zip_md5(dummy_zip_content):
+def dummy_zip_md5(dummy_zip_content: bytes) -> str:
     return hashlib.md5(dummy_zip_content).hexdigest()
 
 
 @patch("py_load_spl.cli.get_db_loader", MagicMock())
 def test_full_load_downloads_when_no_source_is_provided(
-    requests_mock, dummy_zip_content, dummy_zip_md5
-):
+    requests_mock: requests_mock.Mocker,
+    dummy_zip_content: bytes,
+    dummy_zip_md5: str,
+) -> None:
     """
     Verify that `full-load` without --source triggers the download process.
     """
@@ -75,7 +78,7 @@ def test_full_load_downloads_when_no_source_is_provided(
 
 
 @patch("py_load_spl.cli.get_db_loader", MagicMock())
-def test_full_load_uses_source_when_provided(tmp_path):
+def test_full_load_uses_source_when_provided(tmp_path: Path) -> None:
     """
     Verify that `full-load` with --source uses the provided path and does not download.
     """

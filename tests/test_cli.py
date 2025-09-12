@@ -2,10 +2,12 @@ import hashlib
 import logging
 import zipfile
 from pathlib import Path
+from typing import Any
 
 import psycopg2
 import pytest
 import requests_mock
+from pytest_mock import MockerFixture
 from testcontainers.core.wait_strategies import LogMessageWaitStrategy
 from testcontainers.postgres import PostgresContainer
 from typer.testing import CliRunner
@@ -80,25 +82,32 @@ class MockLoader:
         # We accept the settings but ignore them for the mock.
         pass
 
-    def get_processed_archives(self):
+    def get_processed_archives(self) -> set[str]:
         # Return an empty set to simulate no archives being processed yet
         return set()
 
-    def start_run(self, mode):
+    def start_run(self, mode: str) -> int:
         return 1
 
-    def end_run(self, run_id, status, records_loaded=0, error_log=None):
+    def end_run(
+        self,
+        run_id: int,
+        status: str,
+        records_loaded: int = 0,
+        error_log: str | None = None,
+    ) -> None:
         pass
 
-    def record_processed_archive(self, name, checksum):
+    def record_processed_archive(self, name: str, checksum: str) -> None:
         pass
 
 
 @pytest.fixture
-def mock_db_loader(monkeypatch: pytest.MonkeyPatch):
+def mock_db_loader(monkeypatch: pytest.MonkeyPatch) -> None:
     """Fixture to mock the PostgresLoader to avoid real DB connections."""
     monkeypatch.setattr(
-        "py_load_spl.main.get_db_loader", lambda settings: MockLoader(settings)
+        "py_load_spl.main.get_db_loader",
+        lambda settings: MockLoader(settings.db),
     )
 
 
@@ -150,15 +159,17 @@ def mock_db_loader(monkeypatch: pytest.MonkeyPatch):
 
 
 def test_delta_load_no_new_archives(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
-):
+    monkeypatch: pytest.MonkeyPatch,
+    mocker: MockerFixture,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     """
     Tests that delta-load handles the case where no new archives are found.
     """
     # Mock the functions that would perform external actions
     mock_loader_instance = MockLoader(None)
-    mock_loader_instance.start_run = lambda mode: 1
-    mock_loader_instance.end_run = lambda run_id, status, count, error_log: None
+    mocker.patch.object(mock_loader_instance, "start_run", return_value=1)
+    mocker.patch.object(mock_loader_instance, "end_run")
 
     monkeypatch.setattr(
         "py_load_spl.main.get_db_loader", lambda settings: mock_loader_instance
@@ -201,7 +212,9 @@ SAMPLE_XML_CONTENT = """<?xml version="1.0" encoding="UTF-8"?>
 
 
 @pytest.mark.integration
-def test_delta_load_end_to_end(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+def test_delta_load_end_to_end(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """
     An end-to-end integration test for the delta-load command.
     - Mocks the network calls to the FDA website.
@@ -286,6 +299,7 @@ def test_delta_load_end_to_end(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
                 "SELECT archive_name, archive_checksum FROM etl_processed_archives"
             )
             processed_archive = cur.fetchone()
+            assert processed_archive is not None
             assert processed_archive[0] == archive_name
             assert processed_archive[1] == mock_checksum
 
@@ -294,6 +308,7 @@ def test_delta_load_end_to_end(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
                 "SELECT document_id, set_id, product_name, manufacturer_name, dosage_form FROM products"
             )
             product = cur.fetchone()
+            assert product is not None
             assert str(product[0]) == "d1b64b62-050a-4895-924c-d2862d2a6a69"
             assert str(product[1]) == "a2c3b6f0-a38f-4b48-96eb-3b2b403816a4"
             assert product[2] == "Test Drug"
