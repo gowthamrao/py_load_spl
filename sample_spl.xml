@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="urn:hl7-org:v3">
+  <id root="d1b64b62-050a-4895-924c-d2862d2a6a69" />
+  <setId root="a2c3b6f0-a38f-4b48-96eb-3b2b403816a4" />
+  <versionNumber value="1" />
+  <effectiveTime value="20250907" />
+  <subject>
+    <manufacturedProduct>
+      <manufacturedProduct>
+        <name>Jules's Sample Drug</name>
+        <formCode code="C42916" displayName="TABLET" />
+        <asEntityWithGeneric>
+          <genericMedicine>
+            <name>JULAMYCIN</name>
+          </genericMedicine>
+        </asEntityWithGeneric>
+        <asEquivalentEntity>
+            <code code="12345-678" codeSystem="2.16.840.1.113883.6.69" />
+        </asEquivalentEntity>
+        <ingredient classCode="ACT">
+          <quantity>
+            <numerator value="100" unit="mg" />
+            <denominator value="1" unit="TABLET" />
+          </quantity>
+          <ingredientSubstance>
+            <name>JULESTAT</name>
+            <code code="UNII-JULE" displayName="JULESTAT" />
+          </ingredientSubstance>
+        </ingredient>
+      </manufacturedProduct>
+      <manufacturer>
+        <name>Jules Pharmaceuticals</name>
+      </manufacturer>
+    </manufacturedProduct>
+  </subject>
+  <component>
+    <structuredBody>
+      <component>
+        <section ID="s2">
+          <code code="51945-4" displayName="PACKAGE LABEL.PRINCIPAL DISPLAY PANEL" />
+          <text>
+            Some text here that the old parser might have used.
+          </text>
+          <component>
+            <section>
+                <part>
+                  <code code="12345-678-90" displayName="NDC" />
+                  <name>30 Tablets in 1 Bottle</name>
+                  <formCode code="C43182" displayName="BOTTLE" />
+                </part>
+            </section>
+          </component>
+          <subject>
+            <marketingAct>
+              <statusCode code="active"/>
+              <effectiveTime>
+                <low value="20250101"/>
+              </effectiveTime>
+            </marketingAct>
+          </subject>
+        </section>
+      </component>
+    </structuredBody>
+  </component>
+</document>
