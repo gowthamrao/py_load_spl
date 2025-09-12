@@ -1,3 +1,4 @@
+import sqlite3
 from collections.abc import Generator
 from pathlib import Path
 from typing import Any
@@ -306,3 +307,43 @@ def test_optimizations_are_applied_for_full_load(db_settings: SqliteSettings) ->
         assert conn.execute("PRAGMA foreign_keys;").fetchone()[0] == 1
 
     loader.close_conn()
+
+
+def test_merge_from_staging_rolls_back_on_integrity_error(
+    sqlite_loader: SqliteLoader, tmp_path: Path
+) -> None:
+    """
+    Verify that a transaction is rolled back if a foreign key constraint
+    fails during the merge process.
+    """
+    # 1. Arrange: Create data where an ingredient references a non-existent doc
+    intermediate_dir = tmp_path / "intermediate"
+    intermediate_dir.mkdir()
+    # This parent doc is required for the product row
+    (intermediate_dir / "spl_raw_documents.csv").write_text(
+        'doc1,set1,1,2025-01-01,{"key":"value"},file.zip,2025-01-01T12:00:00\n'
+    )
+    (intermediate_dir / "products.csv").write_text(
+        "doc1,set1,1,2025-01-01,Product A,Pfizer,Tablet,Oral,1,2025-01-01T12:00:00\n"
+    )
+    # This ingredient references a document that does NOT exist
+    (intermediate_dir / "ingredients.csv").write_text(
+        "doc-invalid,Aspirin,UNII1,81,mg,mg,1\n"
+    )
+
+    # 2. Act & Assert: The merge should fail with an IntegrityError
+    sqlite_loader.bulk_load_to_staging(intermediate_dir)
+    with pytest.raises(sqlite3.IntegrityError):
+        sqlite_loader.merge_from_staging(mode="full-load")
+
+    # 3. Assert: Verify that the transaction was rolled back
+    with sqlite_loader._get_conn() as conn:
+        # The product that was valid should NOT have been committed
+        product_count = conn.execute("SELECT count(*) FROM products").fetchone()[0]
+        assert product_count == 0
+
+        # The raw document should also not have been committed
+        raw_doc_count = conn.execute(
+            "SELECT count(*) FROM spl_raw_documents"
+        ).fetchone()[0]
+        assert raw_doc_count == 0
