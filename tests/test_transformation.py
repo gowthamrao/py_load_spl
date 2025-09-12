@@ -2,6 +2,7 @@ import csv
 from pathlib import Path
 from uuid import UUID
 
+from pydantic import BaseModel
 import pyarrow.parquet as pq
 import pytest
 from pytest_mock import MockerFixture
@@ -165,3 +166,84 @@ def test_parquet_writer_batching(tmp_path: Path, mocker: MockerFixture) -> None:
         "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
         "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
     }
+
+
+class UnsupportedModel(BaseModel):
+    id: int
+
+
+@pytest.mark.parametrize("writer_class", [CsvWriter, ParquetWriter])
+def test_writer_unsupported_model(
+    tmp_path: Path, writer_class: type[FileWriter]
+) -> None:
+    """Tests that writers raise a TypeError for an unsupported model."""
+    writer = writer_class(tmp_path)
+    model = UnsupportedModel(id=1)
+    with pytest.raises(TypeError, match="No .* mapping for model type"):
+        writer.write(model)
+
+
+def test_transformer_skips_record_with_no_document_id(
+    tmp_path: Path, caplog
+) -> None:
+    """
+    Tests that the transformer skips and logs a warning for records
+    that are missing the 'document_id' field.
+    """
+    record_without_id = SAMPLE_PARSED_RECORD.copy()
+    del record_without_id["document_id"]
+    parsed_data_stream = [record_without_id]
+
+    writer = CsvWriter(tmp_path)
+    transformer = Transformer(writer=writer)
+
+    with caplog.at_level("WARNING"):
+        stats = transformer.transform_stream(parsed_data_stream)
+
+    assert "Skipping record due to missing document_id" in caplog.text
+    assert sum(stats.values()) == 0  # No records should have been written
+
+
+def test_transformer_handles_bad_xml_in_raw_data(tmp_path: Path, caplog) -> None:
+    """
+    Tests that if the raw_data field contains malformed XML, it is handled
+    gracefully by setting the field to None and logging an error.
+    """
+    record_with_bad_xml = SAMPLE_PARSED_RECORD.copy()
+    record_with_bad_xml["raw_data"] = "<xml><unclosed-tag></xml>"
+    parsed_data_stream = [record_with_bad_xml]
+
+    writer = CsvWriter(tmp_path)
+    transformer = Transformer(writer=writer)
+
+    with caplog.at_level("ERROR"):
+        transformer.transform_stream(parsed_data_stream)
+
+    assert "Failed to parse XML and convert to JSON" in caplog.text
+    # Check that the raw_documents file was written with a null for the raw_data
+    raw_docs_file = tmp_path / "spl_raw_documents.csv"
+    with open(raw_docs_file) as f:
+        reader = csv.reader(f)
+        row = next(reader)
+        # raw_data is the 5th field (index 4) in SplRawDocument
+        assert row[4] == "\\N"  # Our custom NULL value for CSV
+
+
+def test_transformer_handles_validation_error(tmp_path: Path, caplog) -> None:
+    """
+    Tests that the transformer skips records that fail Pydantic validation.
+    """
+    record_with_bad_data = SAMPLE_PARSED_RECORD.copy()
+    # Pydantic should fail to validate this as an integer
+    record_with_bad_data["version_number"] = "not-an-int"
+    parsed_data_stream = [record_with_bad_data]
+
+    writer = CsvWriter(tmp_path)
+    transformer = Transformer(writer=writer)
+
+    with caplog.at_level("ERROR"):
+        stats = transformer.transform_stream(parsed_data_stream)
+
+    assert "Failed to transform record" in caplog.text
+    assert "not-an-int" in caplog.text
+    assert sum(stats.values()) == 0

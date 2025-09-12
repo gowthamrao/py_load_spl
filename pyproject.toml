@@ -57,7 +57,7 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 minversion = "6.0"
-addopts = "-ra -q"
+addopts = "-ra -q --cov=src/py_load_spl --cov-report=term-missing --cov-fail-under=94"
 testpaths = [
     "tests",
 ]
