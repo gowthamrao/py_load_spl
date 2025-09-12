@@ -2,29 +2,6 @@ import os
 import uuid
 from collections.abc import Generator
 from pathlib import Path
-from unittest.mock import MagicMock
-
-import boto3
-import psycopg2
-import pytest
-import redshift_connector
-from moto import mock_aws
-from mypy_boto3_s3.client import S3Client
-from pytest_mock import MockerFixture
-from testcontainers.core.wait_strategies import LogMessageWaitStrategy
-from testcontainers.postgres import PostgresContainer
-
-from py_load_spl.config import RedshiftSettings, S3Settings
-from py_load_spl.db.redshift import RedshiftLoader
-
-# Mark all tests in this file as integration tests
-pytestmark = pytest.mark.integration
-
-
-import os
-import uuid
-from collections.abc import Generator
-from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -531,3 +508,112 @@ def test_get_processed_archives_failure(
 
     result = redshift_loader.get_processed_archives()
     assert result == set()
+
+
+def test_initialize_schema_failure(
+    redshift_loader: RedshiftLoader, mocker: MockerFixture
+) -> None:
+    """Tests that a failure during schema initialization is handled."""
+    mocker.patch("pathlib.Path.read_text", return_value="CREATE TABLE test;")
+    mock_cursor = MagicMock()
+    mock_cursor.execute.side_effect = redshift_connector.Error("DDL failed")
+    mock_conn = MagicMock(
+        cursor=MagicMock(
+            return_value=MagicMock(__enter__=MagicMock(return_value=mock_cursor))
+        ),
+        rollback=MagicMock(),
+    )
+    redshift_loader.conn = mock_conn
+    mocker.patch.object(
+        redshift_loader,
+        "_get_conn",
+        return_value=MagicMock(__enter__=MagicMock(return_value=mock_conn)),
+    )
+
+    with pytest.raises(redshift_connector.Error):
+        redshift_loader.initialize_schema()
+
+    mock_conn.rollback.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    "method_to_test, method_args, failing_sql_command",
+    [
+        ("merge_from_staging", {"mode": "full-load"}, "TRUNCATE TABLE"),
+        ("start_run", {"mode": "delta-load"}, "INSERT INTO etl_load_history"),
+        (
+            "end_run",
+            {"run_id": 1, "status": "SUCCESS", "records_loaded": 0, "error_log": None},
+            "UPDATE etl_load_history",
+        ),
+        (
+            "record_processed_archive",
+            {"archive_name": "a", "checksum": "b"},
+            "DELETE FROM etl_processed_archives",
+        ),
+    ],
+)
+def test_generic_redshift_failure_handling(
+    redshift_loader: RedshiftLoader,
+    mocker: MockerFixture,
+    method_to_test: str,
+    method_args: dict,
+    failing_sql_command: str,
+) -> None:
+    """
+    A generic test to verify that rollback is called on database errors
+    for various methods in the RedshiftLoader.
+    """
+    mock_cursor = MagicMock()
+
+    def execute_side_effect(sql: str, *args: Any) -> None:
+        if failing_sql_command in sql:
+            raise redshift_connector.Error("SQL command failed")
+        if "MAX(run_id)" in sql:
+            mock_cursor.fetchone.return_value = (1,)
+
+    mock_cursor.execute.side_effect = execute_side_effect
+
+    mock_conn = MagicMock(
+        cursor=MagicMock(
+            return_value=MagicMock(__enter__=MagicMock(return_value=mock_cursor))
+        ),
+        rollback=MagicMock(),
+    )
+    redshift_loader.conn = mock_conn
+    mocker.patch.object(
+        redshift_loader,
+        "_get_conn",
+        return_value=MagicMock(__enter__=MagicMock(return_value=mock_conn)),
+    )
+
+    method = getattr(redshift_loader, method_to_test)
+
+    with pytest.raises(redshift_connector.Error, match="SQL command failed"):
+        method(**method_args)
+
+    mock_conn.rollback.assert_called_once()
+
+
+def test_post_load_cleanup_failure(
+    redshift_loader: RedshiftLoader, mocker: MockerFixture
+) -> None:
+    """Tests the failure path for post_load_cleanup, which uses autocommit."""
+    mock_cursor = MagicMock()
+    mock_cursor.execute.side_effect = redshift_connector.Error("VACUUM failed")
+    mock_conn = MagicMock(
+        cursor=MagicMock(
+            return_value=MagicMock(__enter__=MagicMock(return_value=mock_cursor))
+        ),
+        rollback=MagicMock(),  # Include a rollback mock to ensure it's NOT called
+    )
+    mocker.patch.object(
+        redshift_loader,
+        "_get_conn",
+        return_value=MagicMock(__enter__=MagicMock(return_value=mock_conn)),
+    )
+
+    with pytest.raises(redshift_connector.Error, match="VACUUM failed"):
+        redshift_loader.post_load_cleanup("full-load")
+
+    mock_conn.rollback.assert_not_called()

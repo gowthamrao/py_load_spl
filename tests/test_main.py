@@ -166,3 +166,90 @@ def test_run_delta_load_integration(
         count = cur.fetchone()[0]
         assert count == 1
     conn.close()
+
+
+@pytest.mark.integration
+def test_run_full_load_no_xml_files(
+    db_settings: DatabaseSettings, tmp_path: Path, caplog
+) -> None:
+    """
+    Tests that run_full_load handles an empty source directory gracefully.
+    """
+    settings = Settings(db=db_settings)
+    empty_dir = tmp_path / "empty"
+    empty_dir.mkdir()
+
+    with caplog.at_level("WARNING"):
+        run_full_load(settings=settings, source=empty_dir)
+
+    assert "No XML files found in the source. Aborting." in caplog.text
+
+
+@patch("py_load_spl.main.get_db_loader")
+def test_run_full_load_data_integrity_error(
+    mock_get_loader: MagicMock, source_xml_dir: Path
+) -> None:
+    """
+    Tests that a RuntimeError is raised if the number of transformed and
+    loaded records do not match.
+    """
+    mock_loader = MagicMock()
+    # Simulate loading more records than were transformed
+    mock_loader.bulk_load_to_staging.return_value = 100
+    mock_get_loader.return_value = mock_loader
+
+    settings = Settings(
+        db=PostgresSettings(adapter="postgresql"),
+    )
+
+    with pytest.raises(RuntimeError) as excinfo:
+        run_full_load(settings=settings, source=source_xml_dir)
+
+    assert "Data integrity check failed!" in str(excinfo.value)
+    assert "Transformed records (2)" in str(excinfo.value)
+    assert "loaded records (100)" in str(excinfo.value)
+
+
+@patch("py_load_spl.main.get_db_loader")
+def test_run_full_load_main_exception(
+    mock_get_loader: MagicMock, source_xml_dir: Path
+) -> None:
+    """Tests that the main exception handler in run_full_load works correctly."""
+    mock_loader = MagicMock()
+    mock_loader.bulk_load_to_staging.return_value = 2  # Pass integrity check
+    mock_loader.merge_from_staging.side_effect = ValueError("DB merge failed")
+    mock_get_loader.return_value = mock_loader
+    mock_loader.start_run.return_value = 123  # Mock run_id
+
+    settings = Settings(
+        db=PostgresSettings(adapter="postgresql"),
+    )
+
+    with pytest.raises(ValueError, match="DB merge failed"):
+        run_full_load(settings=settings, source=source_xml_dir)
+
+    # Verify that the failure was logged in the history table
+    mock_loader.end_run.assert_called_once_with(
+        123, "FAILED", 0, "DB merge failed"
+    )
+
+
+@patch("py_load_spl.main.get_db_loader")
+@patch("py_load_spl.main.download_spl_archives")
+def test_run_delta_load_no_new_archives(
+    mock_download: MagicMock, mock_get_loader: MagicMock, caplog
+) -> None:
+    """
+    Tests that run_delta_load exits gracefully when no new archives are found.
+    """
+    mock_download.return_value = []  # No new archives
+    mock_loader = MagicMock()
+    mock_loader.start_run.return_value = 456
+    mock_get_loader.return_value = mock_loader
+    settings = Settings(db=PostgresSettings(adapter="postgresql"))
+
+    with caplog.at_level("INFO"):
+        run_delta_load(settings)
+
+    assert "No new archives found. Database is up-to-date." in caplog.text
+    mock_loader.end_run.assert_called_once_with(456, "SUCCESS", 0, None)
