@@ -7,7 +7,7 @@ import psycopg2
 import pytest
 from testcontainers.postgres import PostgresContainer
 
-from py_load_spl.config import DatabaseSettings, Settings
+from py_load_spl.config import DatabaseSettings, PostgresSettings, Settings
 from py_load_spl.main import run_delta_load, run_full_load
 
 SAMPLE_XML_CONTENT = """<?xml version="1.0" encoding="UTF-8"?>
@@ -38,9 +38,6 @@ def source_xml_dir(tmp_path: Path) -> Path:
     source_dir.mkdir()
     (source_dir / "test.xml").write_text(SAMPLE_XML_CONTENT)
     return source_dir
-
-
-from py_load_spl.config import PostgresSettings
 
 
 @pytest.fixture

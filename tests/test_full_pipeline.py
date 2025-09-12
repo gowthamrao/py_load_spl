@@ -254,7 +254,7 @@ def test_full_load_pipeline_with_postgres_container(monkeypatch):
         # Set environment variables for the CLI app to use
         monkeypatch.setenv("DB_ADAPTER", "postgresql")
         monkeypatch.setenv("DB_HOST", db_host)
-        monkeypatch.setenv("DB_PORT", db_port)
+        monkeypatch.setenv("DB_PORT", str(db_port))
         monkeypatch.setenv("DB_USER", db_user)
         monkeypatch.setenv("DB_PASSWORD", db_password)
         monkeypatch.setenv("DB_NAME", db_name)

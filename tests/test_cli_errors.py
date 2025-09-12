@@ -1,6 +1,8 @@
+import uuid
 from unittest.mock import MagicMock
 
 import pytest
+from pydantic import ValidationError
 from typer.testing import CliRunner
 
 from py_load_spl.cli import app
@@ -15,9 +17,6 @@ def test_cli_no_command():
     # Typer returns 0 and prints help, which is fine.
     assert result.exit_code == 0
     assert "No command specified" in result.stdout
-
-
-from pydantic import ValidationError
 
 
 def test_cli_unsupported_db_adapter():
@@ -66,9 +65,6 @@ def test_full_load_no_xml_files_found(tmp_path, monkeypatch):
     assert "No XML files found in the source. Aborting." in result.stdout
 
 
-import uuid
-
-
 def test_run_full_load_catches_exception(tmp_path, monkeypatch):
     """Tests that the main try/except block in _run_full_load handles errors."""
     # Create a fake XML file to start the process
@@ -106,4 +102,6 @@ def test_run_full_load_catches_exception(tmp_path, monkeypatch):
         ],
     )
     assert result.exit_code == 1
-    assert "An error occurred during the full load process: Merge Failed!" in result.stdout
+    assert (
+        "An error occurred during the full load process: Merge Failed!" in result.stdout
+    )

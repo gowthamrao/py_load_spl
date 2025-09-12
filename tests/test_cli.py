@@ -1,9 +1,16 @@
+import hashlib
+import logging
+import zipfile
+from pathlib import Path
+
+import psycopg2
 import pytest
+import requests_mock
 from testcontainers.postgres import PostgresContainer
 from typer.testing import CliRunner
 
 from py_load_spl.cli import app
-from py_load_spl.config import DatabaseSettings, Settings
+from py_load_spl.config import DatabaseSettings, PostgresSettings, Settings
 
 runner = CliRunner()
 
@@ -13,9 +20,6 @@ def test_app_exists() -> None:
     A very simple test to ensure the Typer app object can be imported.
     """
     assert app is not None
-
-
-from py_load_spl.config import PostgresSettings
 
 
 @pytest.mark.integration
@@ -49,11 +53,6 @@ def test_init_command(monkeypatch: pytest.MonkeyPatch) -> None:
         assert "Schema initialization complete" in result.stdout
 
 
-import hashlib
-from pathlib import Path
-
-import requests_mock
-
 # A simplified HTML fixture mimicking the structure of the DailyMed page
 HTML_FIXTURE = """
 <html>
@@ -67,9 +66,6 @@ HTML_FIXTURE = """
 </body>
 </html>
 """
-
-
-import logging
 
 
 class MockLoader:
@@ -171,10 +167,6 @@ def test_delta_load_no_new_archives(
     assert "No new archives found" in result.stdout
 
 
-import zipfile
-
-import psycopg2
-
 SAMPLE_XML_CONTENT = """<?xml version="1.0" encoding="UTF-8"?>
 <document xmlns="urn:hl7-org:v3">
   <id root="d1b64b62-050a-4895-924c-d2862d2a6a69" />
@@ -211,7 +203,6 @@ def test_delta_load_end_to_end(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     """
     # 1. Prepare mock archive and settings
     archive_name = "dm_spl_daily_update_09092025.zip"
-    download_url = f"https://example.com/{archive_name}"
 
     # Create a dummy XML file and zip it
     xml_file = tmp_path / "test_spl.xml"
