@@ -67,6 +67,9 @@ pythonpath = [
 markers = [
     "integration: marks tests as integration tests that require external services",
 ]
+filterwarnings = [
+    "ignore:The @wait_container_is_ready decorator is deprecated:DeprecationWarning",
+]
 
 
 [tool.pdm]
