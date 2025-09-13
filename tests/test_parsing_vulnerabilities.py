@@ -81,3 +81,48 @@ def test_parser_is_not_vulnerable_to_billion_laughs(billion_laughs_spl_file: Pat
         parse_spl_file(billion_laughs_spl_file)
 
     assert "Maximum entity amplification factor exceeded" in str(excinfo.value)
+
+
+@pytest.fixture
+def quadratic_blowup_spl_file(tmp_path: Path) -> Path:
+    """Creates a malicious SPL XML file for a 'quadratic blowup' DoS attack."""
+    # This creates an attribute value of over 10 million characters, which should
+    # trigger lxml's built-in protections against huge attributes or entity expansion.
+    entity_content = "a" * 100_000
+    malicious_root_value = "&a;" * 101  # Results in > 10MB string
+    content = f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE document [
+  <!ENTITY a "{entity_content}">
+]>
+<document xmlns="urn:hl7-org:v3">
+  <id root="{malicious_root_value}" />
+  <component>
+    <structuredBody>
+       <component>
+          <section>
+             <text>Some text</text>
+          </section>
+       </component>
+    </structuredBody>
+  </component>
+</document>
+"""
+    file_path = tmp_path / "quadratic_blowup.xml"
+    file_path.write_text(content)
+    return file_path
+
+
+def test_parser_is_not_vulnerable_to_quadratic_blowup(
+    quadratic_blowup_spl_file: Path,
+):
+    """
+    Tests that the parser is not vulnerable to a 'quadratic blowup' DoS attack.
+    lxml has built-in protection against this, which should raise an error.
+    """
+    with pytest.raises(SplParsingError) as excinfo:
+        parse_spl_file(quadratic_blowup_spl_file)
+
+    # We expect lxml to raise an error due to the massive entity expansion.
+    # The error message could be about a "huge attribute" or "entity amplification".
+    error_str = str(excinfo.value).lower()
+    assert "huge" in error_str or "amplification" in error_str
