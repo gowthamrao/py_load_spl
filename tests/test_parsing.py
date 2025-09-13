@@ -367,6 +367,78 @@ def test_parsing_no_packaging(spl_file_no_packaging: Path) -> None:
 
 
 @pytest.fixture
+def spl_file_with_package_desc_tag(tmp_path: Path) -> Path:
+    """Creates a temporary SPL XML file where packaging uses <desc> instead of <name>."""
+    spl_content = """<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="urn:hl7-org:v3">
+  <id root="pkg-desc-fallback-doc" />
+  <component>
+    <structuredBody>
+      <component>
+        <section>
+          <code code="34069-5" displayName="PACKAGE LABEL" />
+          <component><section>
+            <part>
+              <code code="NDC-DESC" />
+              <desc>Description from desc tag</desc>
+            </part>
+          </section></component>
+        </section>
+      </component>
+    </structuredBody>
+  </component>
+</document>
+"""
+    file_path = tmp_path / "pkg_desc_fallback.xml"
+    file_path.write_text(spl_content)
+    return file_path
+
+
+def test_parsing_packaging_with_desc_tag(spl_file_with_package_desc_tag: Path) -> None:
+    """Tests that the parser correctly falls back to the <desc> tag for packaging description."""
+    data = parse_spl_file(spl_file_with_package_desc_tag)
+    assert len(data["packaging"]) == 1
+    assert data["packaging"][0]["package_ndc"] == "NDC-DESC"
+    assert data["packaging"][0]["package_description"] == "Description from desc tag"
+
+
+@pytest.mark.parametrize("packaging_code", ["34069-5", "51945-4"])
+def test_parsing_packaging_section_codes(tmp_path: Path, packaging_code: str) -> None:
+    """Tests that both recognized packaging section codes are parsed correctly."""
+    spl_content = f"""<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="urn:hl7-org:v3">
+  <id root="pkg-code-test-doc" />
+  <component>
+    <structuredBody>
+      <component>
+        <section>
+          <code code="{packaging_code}" displayName="PACKAGE LABEL" />
+          <component><section>
+            <part>
+              <code code="NDC-PARAM-TEST" />
+              <name>Package from code {packaging_code}</name>
+            </part>
+          </section></component>
+        </section>
+      </component>
+    </structuredBody>
+  </component>
+</document>
+"""
+    file_path = tmp_path / f"pkg_code_{packaging_code}.xml"
+    file_path.write_text(spl_content)
+
+    data = parse_spl_file(file_path)
+
+    assert len(data["packaging"]) == 1
+    assert data["packaging"][0]["package_ndc"] == "NDC-PARAM-TEST"
+    assert (
+        data["packaging"][0]["package_description"]
+        == f"Package from code {packaging_code}"
+    )
+
+
+@pytest.fixture
 def spl_file_invalid_version(tmp_path: Path) -> Path:
     """Creates a temporary SPL XML file with a non-integer version number."""
     spl_content = """<?xml version="1.0" encoding="UTF-8"?>
@@ -385,3 +457,53 @@ def test_parsing_invalid_version_number(spl_file_invalid_version: Path) -> None:
     with pytest.raises(SplParsingError) as excinfo:
         parse_spl_file(spl_file_invalid_version)
     assert "A critical error occurred during parsing" in str(excinfo.value)
+
+
+def test_parse_real_sample_spl_file() -> None:
+    """
+    Tests parsing a real, more complex sample SPL file from the project root.
+    """
+    # The file is in the root, so we go up one level from the tests directory
+    real_sample_file = Path(__file__).parent.parent / "sample_spl.xml"
+    assert real_sample_file.exists(), f"Sample file not found at {real_sample_file}"
+
+    data = parse_spl_file(real_sample_file)
+
+    # Assert metadata from the sample file
+    assert data["document_id"] == "d1b64b62-050a-4895-924c-d2862d2a6a69"
+    assert data["set_id"] == "a2c3b6f0-a38f-4b48-96eb-3b2b403816a4"
+    assert data["version_number"] == 1
+    assert data["effective_time"] == "20250907"
+
+    # Assert product details
+    assert data["product_name"] == "Jules's Sample Drug"
+    assert data["manufacturer_name"] == "Jules Pharmaceuticals"
+    assert data["dosage_form"] == "TABLET"
+
+    # Assert ingredients
+    assert len(data["ingredients"]) == 1
+    ingredient = data["ingredients"][0]
+    assert ingredient["ingredient_name"] == "JULESTAT"
+    assert ingredient["substance_code"] == "UNII-JULE"
+    assert ingredient["is_active_ingredient"] is True
+    assert ingredient["strength_numerator"] == "100"
+    assert ingredient["strength_denominator"] == "1"
+    assert ingredient["unit_of_measure"] == "mg"
+
+    # Assert packaging
+    assert len(data["packaging"]) == 1
+    package = data["packaging"][0]
+    assert package["package_ndc"] == "12345-678-90"
+    assert package["package_description"] == "30 Tablets in 1 Bottle"
+    assert package["package_type"] == "BOTTLE"
+
+    # Assert product NDCs
+    assert len(data["product_ndcs"]) == 1
+    ndc = data["product_ndcs"][0]
+    assert ndc["ndc_code"] == "12345-678"
+
+    # Assert marketing status
+    assert len(data["marketing_status"]) == 1
+    status = data["marketing_status"][0]
+    assert status["marketing_category"] == "active"
+    assert status["start_date"] == "20250101"
