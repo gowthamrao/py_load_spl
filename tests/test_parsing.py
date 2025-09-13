@@ -214,3 +214,174 @@ def test_parse_spl_file_no_document_tag(tmp_path: Path) -> None:
     file_path.write_text("<root><item>1</item></root>")
     with pytest.raises(SplParsingError):
         parse_spl_file(file_path)
+
+
+@pytest.fixture
+def spl_file_with_multiple_ingredients(tmp_path: Path) -> Path:
+    """Creates a temporary SPL XML file with multiple ingredients."""
+    spl_content = """<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="urn:hl7-org:v3">
+  <id root="multi-ingr-doc" />
+  <setId root="multi-ingr-set" />
+  <subject>
+    <manufacturedProduct>
+      <manufacturedProduct>
+        <ingredient classCode="ACT">
+          <ingredientSubstance><name>INGREDIENT-A</name></ingredientSubstance>
+        </ingredient>
+        <ingredient classCode="INA">
+          <ingredientSubstance><name>INGREDIENT-B</name></ingredientSubstance>
+        </ingredient>
+      </manufacturedProduct>
+    </manufacturedProduct>
+  </subject>
+</document>
+"""
+    file_path = tmp_path / "multi_ingredient.xml"
+    file_path.write_text(spl_content)
+    return file_path
+
+
+def test_parsing_multiple_ingredients(spl_file_with_multiple_ingredients: Path) -> None:
+    """Tests that the parser correctly extracts multiple ingredients."""
+    data = parse_spl_file(spl_file_with_multiple_ingredients)
+    assert len(data["ingredients"]) == 2
+    assert data["ingredients"][0]["ingredient_name"] == "INGREDIENT-A"
+    assert data["ingredients"][0]["is_active_ingredient"] is True
+    assert data["ingredients"][1]["ingredient_name"] == "INGREDIENT-B"
+    assert data["ingredients"][1]["is_active_ingredient"] is False
+
+
+@pytest.fixture
+def spl_file_with_multiple_packages(tmp_path: Path) -> Path:
+    """Creates a temporary SPL XML file with multiple packaging entries."""
+    spl_content = """<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="urn:hl7-org:v3">
+  <id root="multi-pkg-doc" />
+  <setId root="multi-pkg-set" />
+  <component>
+    <structuredBody>
+      <component>
+        <section>
+          <code code="34069-5" displayName="PACKAGE LABEL" />
+          <component><section>
+            <part>
+              <code code="NDC-1" />
+              <name>10 Vials per Carton</name>
+            </part>
+            <part>
+              <code code="NDC-2" />
+              <name>1 Vial</name>
+            </part>
+          </section></component>
+        </section>
+      </component>
+    </structuredBody>
+  </component>
+</document>
+"""
+    file_path = tmp_path / "multi_package.xml"
+    file_path.write_text(spl_content)
+    return file_path
+
+
+def test_parsing_multiple_packaging_entries(
+    spl_file_with_multiple_packages: Path,
+) -> None:
+    """Tests that the parser correctly extracts multiple packaging entries."""
+    data = parse_spl_file(spl_file_with_multiple_packages)
+    assert len(data["packaging"]) == 2
+    assert data["packaging"][0]["package_ndc"] == "NDC-1"
+    assert data["packaging"][1]["package_ndc"] == "NDC-2"
+
+
+@pytest.fixture
+def spl_file_missing_attribute(tmp_path: Path) -> Path:
+    """Creates a temporary SPL XML file with a missing 'root' attribute."""
+    spl_content = """<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="urn:hl7-org:v3">
+  <id />
+  <setId root="missing-attr-set" />
+</document>
+"""
+    file_path = tmp_path / "missing_attribute.xml"
+    file_path.write_text(spl_content)
+    return file_path
+
+
+def test_parsing_missing_attribute(spl_file_missing_attribute: Path) -> None:
+    """Tests parsing of an element with a missing attribute."""
+    data = parse_spl_file(spl_file_missing_attribute)
+    assert data["document_id"] is None
+    assert data["set_id"] == "missing-attr-set"
+
+
+@pytest.fixture
+def spl_file_no_ingredients(tmp_path: Path) -> Path:
+    """Creates a temporary SPL XML file with no ingredients."""
+    spl_content = """<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="urn:hl7-org:v3">
+  <id root="no-ingr-doc" />
+  <subject>
+    <manufacturedProduct>
+      <manufacturedProduct>
+        <name>Drug With No Ingredients Listed</name>
+      </manufacturedProduct>
+    </manufacturedProduct>
+  </subject>
+</document>
+"""
+    file_path = tmp_path / "no_ingredients.xml"
+    file_path.write_text(spl_content)
+    return file_path
+
+
+def test_parsing_no_ingredients(spl_file_no_ingredients: Path) -> None:
+    """Tests that a file with no ingredients is parsed without error."""
+    data = parse_spl_file(spl_file_no_ingredients)
+    assert data["ingredients"] == []
+
+
+@pytest.fixture
+def spl_file_no_packaging(tmp_path: Path) -> Path:
+    """Creates a temporary SPL XML file with no packaging section."""
+    spl_content = """<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="urn:hl7-org:v3">
+  <id root="no-pkg-doc" />
+  <component>
+    <structuredBody>
+      <!-- No packaging section here -->
+    </structuredBody>
+  </component>
+</document>
+"""
+    file_path = tmp_path / "no_packaging.xml"
+    file_path.write_text(spl_content)
+    return file_path
+
+
+def test_parsing_no_packaging(spl_file_no_packaging: Path) -> None:
+    """Tests that a file with no packaging is parsed without error."""
+    data = parse_spl_file(spl_file_no_packaging)
+    assert data["packaging"] == []
+
+
+@pytest.fixture
+def spl_file_invalid_version(tmp_path: Path) -> Path:
+    """Creates a temporary SPL XML file with a non-integer version number."""
+    spl_content = """<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="urn:hl7-org:v3">
+  <id root="invalid-version-doc" />
+  <versionNumber value="not-a-number" />
+</document>
+"""
+    file_path = tmp_path / "invalid_version.xml"
+    file_path.write_text(spl_content)
+    return file_path
+
+
+def test_parsing_invalid_version_number(spl_file_invalid_version: Path) -> None:
+    """Tests that a non-integer version number raises a SplParsingError."""
+    with pytest.raises(SplParsingError) as excinfo:
+        parse_spl_file(spl_file_invalid_version)
+    assert "A critical error occurred during parsing" in str(excinfo.value)
