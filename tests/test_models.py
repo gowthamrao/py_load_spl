@@ -24,7 +24,9 @@ from py_load_spl.models import (
         (None, None),  # None should remain None
     ],
 )
-def test_clean_string_validator(input_val: str | None, expected_val: str | None) -> None:
+def test_clean_string_validator(
+    input_val: str | None, expected_val: str | None
+) -> None:
     """
     Tests the reusable clean_string validator directly.
     """

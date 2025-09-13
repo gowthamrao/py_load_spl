@@ -1,7 +1,9 @@
-import pytest
 from pathlib import Path
-from lxml import etree
-from py_load_spl.parsing import parse_spl_file, SplParsingError
+
+import pytest
+
+from py_load_spl.parsing import SplParsingError, parse_spl_file
+
 
 @pytest.fixture
 def xxe_spl_file(tmp_path: Path) -> Path:
@@ -57,7 +59,7 @@ def billion_laughs_spl_file(tmp_path: Path) -> Path:
     return file_path
 
 
-def test_parser_is_not_vulnerable_to_xxe(xxe_spl_file: Path):
+def test_parser_is_not_vulnerable_to_xxe(xxe_spl_file: Path) -> None:
     """
     Tests that the parser does not resolve external entities, preventing
     an XXE attack that would read a local file.
@@ -72,7 +74,7 @@ def test_parser_is_not_vulnerable_to_xxe(xxe_spl_file: Path):
     assert "&xxe;" in data["raw_data"]
 
 
-def test_parser_is_not_vulnerable_to_billion_laughs(billion_laughs_spl_file: Path):
+def test_parser_is_not_vulnerable_to_billion_laughs(billion_laughs_spl_file: Path) -> None:
     """
     Tests that the parser is not vulnerable to a 'billion laughs' DoS attack.
     lxml has built-in protection against this, which should raise an error.
@@ -114,7 +116,7 @@ def quadratic_blowup_spl_file(tmp_path: Path) -> Path:
 
 def test_parser_is_not_vulnerable_to_quadratic_blowup(
     quadratic_blowup_spl_file: Path,
-):
+) -> None:
     """
     Tests that the parser is not vulnerable to a 'quadratic blowup' DoS attack.
     lxml has built-in protection against this, which should raise an error.

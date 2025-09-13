@@ -2,7 +2,6 @@ import hashlib
 import logging
 import zipfile
 from pathlib import Path
-from typing import Any
 
 import psycopg2
 import pytest
@@ -212,9 +211,7 @@ SAMPLE_XML_CONTENT = """<?xml version="1.0" encoding="UTF-8"?>
 
 
 @pytest.mark.integration
-def test_delta_load_end_to_end(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_delta_load_end_to_end(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """
     An end-to-end integration test for the delta-load command.
     - Mocks the network calls to the FDA website.

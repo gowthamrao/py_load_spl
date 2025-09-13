@@ -225,11 +225,13 @@ def test_download_archive_io_error(
     mock_settings: Settings, requests_mock: requests_mock.Mocker
 ) -> None:
     """Tests that an IOError during file write cleans up the partial file."""
-    archive = Archive(name="test.zip", url="https://example.com/test.zip", checksum="abc")
+    archive = Archive(
+        name="test.zip", url="https://example.com/test.zip", checksum="abc"
+    )
     requests_mock.get("https://example.com/test.zip", content=b"data")
     file_path = Path(mock_settings.download_path) / archive.name
 
-    with patch("builtins.open", side_effect=IOError("Disk full")):
+    with patch("builtins.open", side_effect=OSError("Disk full")):
         with pytest.raises(IOError):
             download_archive(archive, mock_settings)
 

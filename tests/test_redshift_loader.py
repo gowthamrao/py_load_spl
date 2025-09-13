@@ -557,7 +557,7 @@ def test_generic_redshift_failure_handling(
     redshift_loader: RedshiftLoader,
     mocker: MockerFixture,
     method_to_test: str,
-    method_args: dict,
+    method_args: dict[str, Any],
     failing_sql_command: str,
 ) -> None:
     """
