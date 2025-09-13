@@ -1,5 +1,8 @@
+from collections.abc import Generator
+
 import psycopg2
 import pytest
+from pytest_mock import MockerFixture
 from testcontainers.core.wait_strategies import LogMessageWaitStrategy
 from testcontainers.postgres import PostgresContainer
 
@@ -10,7 +13,6 @@ from py_load_spl.db.postgres import PostgresLoader
 pytestmark = pytest.mark.integration
 
 
-from collections.abc import Generator
 
 
 @pytest.fixture(scope="module")
@@ -26,7 +28,6 @@ def postgres_container() -> Generator[PostgresContainer, None, None]:
         yield postgres
 
 
-from pytest_mock import MockerFixture
 
 
 @pytest.fixture

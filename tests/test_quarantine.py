@@ -71,9 +71,7 @@ class MockLoader:
 
 
 @pytest.fixture
-def mock_db_and_settings(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> Settings:
+def mock_db_and_settings(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Settings:
     """Mocks the DB loader and overrides settings for the test."""
     quarantine_dir = tmp_path / "quarantine"
     test_settings = Settings(quarantine_path=str(quarantine_dir))

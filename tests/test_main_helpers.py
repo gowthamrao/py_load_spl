@@ -1,35 +1,37 @@
+from pathlib import Path
 import pytest
-from py_load_spl.main import get_db_loader, get_file_writer
+
 from py_load_spl.config import (
-    Settings,
-    PostgresSettings,
-    SqliteSettings,
-    RedshiftSettings,
     DatabricksSettings,
+    PostgresSettings,
+    RedshiftSettings,
     S3Settings,
+    Settings,
+    SqliteSettings,
 )
-from py_load_spl.db.postgres import PostgresLoader
-from py_load_spl.db.sqlite import SqliteLoader
-from py_load_spl.db.redshift import RedshiftLoader
 from py_load_spl.db.databricks import DatabricksLoader
+from py_load_spl.db.postgres import PostgresLoader
+from py_load_spl.db.redshift import RedshiftLoader
+from py_load_spl.db.sqlite import SqliteLoader
+from py_load_spl.main import get_db_loader, get_file_writer
 from py_load_spl.transformation import CsvWriter, ParquetWriter
 
 
-def test_get_db_loader_postgresql():
+def test_get_db_loader_postgresql() -> None:
     """Tests that the correct loader is returned for postgresql."""
     settings = Settings(db=PostgresSettings(adapter="postgresql"))
     loader = get_db_loader(settings)
     assert isinstance(loader, PostgresLoader)
 
 
-def test_get_db_loader_sqlite():
+def test_get_db_loader_sqlite() -> None:
     """Tests that the correct loader is returned for sqlite."""
-    settings = Settings(db=SqliteSettings(adapter="sqlite", file="test.db"))
+    settings = Settings(db=SqliteSettings(adapter="sqlite", name="test.db"))
     loader = get_db_loader(settings)
     assert isinstance(loader, SqliteLoader)
 
 
-def test_get_db_loader_redshift():
+def test_get_db_loader_redshift() -> None:
     """Tests that the correct loader is returned for redshift."""
     settings = Settings(
         db=RedshiftSettings(
@@ -45,7 +47,7 @@ def test_get_db_loader_redshift():
     assert isinstance(loader, RedshiftLoader)
 
 
-def test_get_db_loader_databricks():
+def test_get_db_loader_databricks() -> None:
     """Tests that the correct loader is returned for databricks."""
     settings = Settings(
         db=DatabricksSettings(
@@ -60,7 +62,9 @@ def test_get_db_loader_databricks():
     assert isinstance(loader, DatabricksLoader)
 
 
-def test_get_db_loader_unsupported(monkeypatch):
+
+
+def test_get_db_loader_unsupported(monkeypatch: pytest.MonkeyPatch) -> None:
     """Tests that a ValueError is raised for an unsupported adapter."""
     settings = Settings(db=PostgresSettings(adapter="postgresql"))
     # Bypass pydantic validation to test the function's logic
@@ -69,7 +73,7 @@ def test_get_db_loader_unsupported(monkeypatch):
         get_db_loader(settings)
 
 
-def test_get_file_writer_csv(tmp_path):
+def test_get_file_writer_csv(tmp_path: Path) -> None:
     """Tests that the CsvWriter is returned for the 'csv' format."""
     settings = Settings(db=PostgresSettings(adapter="postgresql"))
     # Ensure the default is tested
@@ -78,7 +82,7 @@ def test_get_file_writer_csv(tmp_path):
     assert isinstance(writer, CsvWriter)
 
 
-def test_get_file_writer_parquet(tmp_path, monkeypatch):
+def test_get_file_writer_parquet(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Tests that the ParquetWriter is returned for the 'parquet' format."""
     settings = Settings(db=PostgresSettings(adapter="postgresql"))
     monkeypatch.setattr(settings, "intermediate_format", "parquet")
@@ -86,9 +90,11 @@ def test_get_file_writer_parquet(tmp_path, monkeypatch):
     assert isinstance(writer, ParquetWriter)
 
 
-def test_get_file_writer_unsupported(tmp_path, monkeypatch):
+def test_get_file_writer_unsupported(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Tests that a ValueError is raised for an unsupported format."""
     settings = Settings(db=PostgresSettings(adapter="postgresql"))
     monkeypatch.setattr(settings, "intermediate_format", "unsupported")
-    with pytest.raises(ValueError, match="Unsupported intermediate format 'unsupported'"):
+    with pytest.raises(
+        ValueError, match="Unsupported intermediate format 'unsupported'"
+    ):
         get_file_writer(settings, tmp_path)
