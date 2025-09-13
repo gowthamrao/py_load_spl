@@ -1,10 +1,13 @@
-import pytest
 import uuid
 from datetime import datetime
 from pathlib import Path
-from py_load_spl.main import run_full_load
+from unittest.mock import MagicMock, patch
+
+import pytest
+
 from py_load_spl.config import get_settings
-from unittest.mock import patch, MagicMock
+from py_load_spl.main import run_full_load
+
 
 @pytest.fixture
 def corrupt_spl_file(tmp_path: Path) -> Path:
@@ -30,8 +33,8 @@ def corrupt_spl_file(tmp_path: Path) -> Path:
 
 @patch("py_load_spl.main.get_db_loader")
 def test_full_load_with_corrupt_file(
-    mock_get_db_loader, tmp_path: Path, corrupt_spl_file: Path
-):
+    mock_get_db_loader: MagicMock, tmp_path: Path, corrupt_spl_file: Path
+) -> None:
     """
     Tests that the full-load process handles a corrupt XML file gracefully,
     quarantines it, and continues processing other valid files.
@@ -43,7 +46,7 @@ def test_full_load_with_corrupt_file(
     # Create a valid SPL file to ensure the pipeline continues
     doc_id = str(uuid.uuid4())
     set_id = str(uuid.uuid4())
-    effective_time = datetime.now().strftime('%Y%m%d')
+    effective_time = datetime.now().strftime("%Y%m%d")
     valid_content = f"""<?xml version="1.0" encoding="UTF-8"?>
 <document xmlns="urn:hl7-org:v3">
   <id root="{doc_id}" />
@@ -60,7 +63,7 @@ def test_full_load_with_corrupt_file(
     # Get settings and override paths for the test
     settings = get_settings()
     settings.quarantine_path = str(tmp_path / "quarantine")
-    settings.db.adapter = "sqlite" # Use a mock-friendly adapter
+    settings.db.adapter = "sqlite"  # Use a mock-friendly adapter
 
     # Mock the database loader
     mock_loader = MagicMock()

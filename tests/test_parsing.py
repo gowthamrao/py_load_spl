@@ -1,7 +1,6 @@
 from pathlib import Path
 
 import pytest
-from lxml import etree
 
 from py_load_spl.parsing import SplParsingError, parse_spl_file
 
@@ -167,7 +166,9 @@ def spl_file_with_multiple_statuses(tmp_path: Path) -> Path:
     return file_path
 
 
-def test_parsing_multiple_marketing_statuses(spl_file_with_multiple_statuses: Path) -> None:
+def test_parsing_multiple_marketing_statuses(
+    spl_file_with_multiple_statuses: Path,
+) -> None:
     """
     Tests that the parser correctly extracts multiple marketing status entries,
     including those with and without an end date.

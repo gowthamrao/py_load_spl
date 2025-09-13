@@ -170,7 +170,7 @@ def test_run_delta_load_integration(
 
 @pytest.mark.integration
 def test_run_full_load_no_xml_files(
-    db_settings: DatabaseSettings, tmp_path: Path, caplog
+    db_settings: DatabaseSettings, tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     """
     Tests that run_full_load handles an empty source directory gracefully.
@@ -229,15 +229,13 @@ def test_run_full_load_main_exception(
         run_full_load(settings=settings, source=source_xml_dir)
 
     # Verify that the failure was logged in the history table
-    mock_loader.end_run.assert_called_once_with(
-        123, "FAILED", 0, "DB merge failed"
-    )
+    mock_loader.end_run.assert_called_once_with(123, "FAILED", 0, "DB merge failed")
 
 
 @patch("py_load_spl.main.get_db_loader")
 @patch("py_load_spl.main.download_spl_archives")
 def test_run_delta_load_no_new_archives(
-    mock_download: MagicMock, mock_get_loader: MagicMock, caplog
+    mock_download: MagicMock, mock_get_loader: MagicMock, caplog: pytest.LogCaptureFixture
 ) -> None:
     """
     Tests that run_delta_load exits gracefully when no new archives are found.

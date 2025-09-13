@@ -2,9 +2,9 @@ import csv
 from pathlib import Path
 from uuid import UUID
 
-from pydantic import BaseModel
 import pyarrow.parquet as pq
 import pytest
+from pydantic import BaseModel
 from pytest_mock import MockerFixture
 
 from py_load_spl.transformation import (
@@ -183,9 +183,7 @@ def test_writer_unsupported_model(
         writer.write(model)
 
 
-def test_transformer_skips_record_with_no_document_id(
-    tmp_path: Path, caplog
-) -> None:
+def test_transformer_skips_record_with_no_document_id(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     """
     Tests that the transformer skips and logs a warning for records
     that are missing the 'document_id' field.
@@ -204,7 +202,7 @@ def test_transformer_skips_record_with_no_document_id(
     assert sum(stats.values()) == 0  # No records should have been written
 
 
-def test_transformer_handles_bad_xml_in_raw_data(tmp_path: Path, caplog) -> None:
+def test_transformer_handles_bad_xml_in_raw_data(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     """
     Tests that if the raw_data field contains malformed XML, it is handled
     gracefully by setting the field to None and logging an error.
@@ -229,7 +227,7 @@ def test_transformer_handles_bad_xml_in_raw_data(tmp_path: Path, caplog) -> None
         assert row[4] == "\\N"  # Our custom NULL value for CSV
 
 
-def test_transformer_handles_validation_error(tmp_path: Path, caplog) -> None:
+def test_transformer_handles_validation_error(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     """
     Tests that the transformer skips records that fail Pydantic validation.
     """
