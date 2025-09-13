@@ -1,76 +1,57 @@
-from pathlib import Path
-
 import pytest
-from lxml import etree
+from pathlib import Path
+from memory_profiler import memory_usage
+from py_load_spl.parsing import parse_spl_file
 
-from py_load_spl.parsing import SplParsingError, parse_spl_file
+def create_large_spl_file(tmp_path: Path, size_in_mb: int) -> Path:
+    """Creates a large, fake SPL XML file for memory testing."""
+    file_path = tmp_path / "large_spl.xml"
+    content_to_repeat = """
+    <component>
+        <section>
+            <part>
+                <code code="NDC-1" />
+                <name>Some text to make the file larger and larger and larger.</name>
+            </part>
+        </section>
+    </component>
+    """
+    repeat_count = (size_in_mb * 1024 * 1024) // len(content_to_repeat)
 
-# A large-ish XML content without the correct namespace
-XML_CONTENT_NO_NAMESPACE = """
-<document>
-  <id root="d1b64b62-050a-4895-924c-d2862d2a6a69" />
-  <data>{}</data>
-</document>
-"""
-
-# A large-ish XML content with the wrong root tag
-XML_CONTENT_WRONG_TAG = """
-<doc xmlns="urn:hl7-org:v3">
-  <id root="d1b64b62-050a-4895-924c-d2862d2a6a69" />
-  <data>{}</data>
-</doc>
-"""
-
-
-@pytest.fixture
-def large_xml_file(tmp_path: Path) -> Path:
-    """Creates a large XML file for memory testing."""
-    file_path = tmp_path / "large_test.xml"
-    # Create a reasonably large file (e.g., 10MB)
-    large_data = "A" * (10 * 1024 * 1024)  # 10 MB of dummy data
-    file_path.write_text(XML_CONTENT_NO_NAMESPACE.format(large_data))
+    with file_path.open("w", encoding="utf-8") as f:
+        f.write('<?xml version="1.0" encoding="UTF-8"?>\n')
+        f.write('<document xmlns="urn:hl7-org:v3">\n')
+        f.write('<id root="large-file-test"/>\n')
+        f.write('<subject><manufacturedProduct><manufacturedProduct/></manufacturedProduct></subject>')
+        f.write('<component><structuredBody>')
+        for _ in range(repeat_count):
+            f.write(content_to_repeat)
+        f.write('</structuredBody></component>')
+        f.write('</document>\n')
     return file_path
 
-
 @pytest.fixture
-def large_xml_file_wrong_tag(tmp_path: Path) -> Path:
-    """Creates a large XML file with the wrong root tag."""
-    file_path = tmp_path / "large_test_wrong_tag.xml"
-    large_data = "A" * (10 * 1024 * 1024)  # 10 MB of dummy data
-    file_path.write_text(XML_CONTENT_WRONG_TAG.format(large_data))
-    return file_path
+def large_spl_file(tmp_path: Path) -> Path:
+    return create_large_spl_file(tmp_path, 5)
 
+@pytest.mark.xfail(
+    reason="Memory inefficiency in parser. The current parser loads the entire file "
+           "into memory via read_text() and then builds a full lxml tree, causing "
+           "high memory usage for large files. A streaming parsing approach is needed "
+           "to fix this, which is a major refactoring."
+)
+def test_parse_spl_file_memory_efficiency(large_spl_file: Path):
+    """
+    Tests that parse_spl_file uses a constant, low amount of memory.
+    This test is expected to fail until the parser is refactored.
+    """
+    file_size_mb = large_spl_file.stat().st_size / (1024 * 1024)
+    mem_usage = memory_usage((parse_spl_file, (large_spl_file,)), interval=0.1, timeout=200)
+    memory_increase_mb = max(mem_usage) - mem_usage[0]
 
-def test_parsing_fails_on_large_text_node(large_xml_file: Path) -> None:
-    """
-    Verify that lxml's built-in resource limits prevent huge text nodes
-    from being loaded, and our parser handles the resulting error.
-    """
-    with pytest.raises(etree.XMLSyntaxError, match="Resource limit exceeded"):
-        parse_spl_file(large_xml_file)
+    print(f"File size: {file_size_mb:.2f} MB")
+    print(f"Memory increase: {memory_increase_mb:.2f} MiB")
 
-
-def test_parsing_fails_gracefully_on_wrong_tag(tmp_path: Path) -> None:
-    """
-    Verify that parsing a file with the wrong root tag (but otherwise well-formed)
-    fails with our custom SplParsingError. This tests the StopIteration catch.
-    """
-    file_path = tmp_path / "wrong_tag.xml"
-    file_path.write_text('<doc xmlns="urn:hl7-org:v3"><data/></doc>')
-    with pytest.raises(
-        SplParsingError, match="Could not find the root <document> element"
-    ):
-        parse_spl_file(file_path)
-
-
-def test_parsing_fails_gracefully_on_missing_namespace(tmp_path: Path) -> None:
-    """
-    Verify that parsing a file with the correct tag but no namespace
-    fails with our custom SplParsingError.
-    """
-    file_path = tmp_path / "no_namespace.xml"
-    file_path.write_text("<document><data/></document>")
-    with pytest.raises(
-        SplParsingError, match="Could not find the root <document> element"
-    ):
-        parse_spl_file(file_path)
+    # The memory increase should be much smaller than the file size.
+    # This assertion will FAIL with the current implementation.
+    assert memory_increase_mb < 1

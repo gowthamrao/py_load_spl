@@ -193,18 +193,18 @@ def test_parsing_multiple_marketing_statuses(spl_file_with_multiple_statuses: Pa
 
 
 def test_parse_spl_file_empty_file(tmp_path: Path) -> None:
-    """Tests that parsing an empty file raises an XMLSyntaxError."""
+    """Tests that parsing an empty file raises SplParsingError."""
     file_path = tmp_path / "empty.xml"
     file_path.write_text("")
-    with pytest.raises(etree.XMLSyntaxError):
+    with pytest.raises(SplParsingError):
         parse_spl_file(file_path)
 
 
 def test_parse_spl_file_invalid_xml(tmp_path: Path) -> None:
-    """Tests that parsing a non-xml file raises an XMLSyntaxError."""
+    """Tests that parsing a non-xml file raises SplParsingError."""
     file_path = tmp_path / "invalid.xml"
     file_path.write_text("this is not xml")
-    with pytest.raises(etree.XMLSyntaxError):
+    with pytest.raises(SplParsingError):
         parse_spl_file(file_path)
 
 

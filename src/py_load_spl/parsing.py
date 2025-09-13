@@ -44,16 +44,27 @@ def parse_spl_file(file_path: Path) -> dict[str, Any]:
         logger.error(f"Could not read file {file_path}: {e}")
         raise
 
-    context = etree.iterparse(
-        file_path, events=("end",), tag=f"{{{NAMESPACES['hl7']}}}document"
-    )
     try:
+        # Use iterparse for memory-efficient parsing.
+        # Security: Disable entity resolution to prevent XXE attacks.
+        context = etree.iterparse(
+            file_path,
+            events=("end",),
+            tag=f"{{{NAMESPACES['hl7']}}}document",
+            resolve_entities=False,
+        )
         _, root = next(context)
     except StopIteration:
         raise SplParsingError(
             "Could not find the root <document> element in the expected namespace.",
             file_path=file_path,
         ) from None
+    except etree.XMLSyntaxError as e:
+        # Catch parsing errors that can happen with iterparse, e.g., malformed XML
+        logger.error(f"XML syntax error in {file_path}: {e}")
+        raise SplParsingError(
+            f"XML syntax error during parsing: {e}", file_path=file_path
+        ) from e
 
     data: dict[str, Any] = {
         "ingredients": [],
