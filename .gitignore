@@ -1,0 +1,12 @@
+# Ignore directories
+.pdm-python/
+__pycache__/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# Ignore data files
+data/
+
+# Coverage reports
+.coverage
