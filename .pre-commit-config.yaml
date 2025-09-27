@@ -1,20 +1,32 @@
+# See https://pre-commit.com for more information
+# See https://pre-commit.com/hooks.html for more hooks
 repos:
--   repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.1.6 # Use a recent, stable version
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
     hooks:
-    -   id: ruff
-        args: [--fix, --exit-non-zero-on-fix]
-    -   id: ruff-format
+      - id: check-yaml
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: check-added-large-files
 
--   repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.7.0 # Use a recent, stable version
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.1
     hooks:
-    -   id: mypy
-        args: [--strict]
+      - id: ruff
+        args: [--fix, --exit-non-zero-on-fix]
+      - id: ruff-format
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.11.0
+    hooks:
+      - id: mypy
         additional_dependencies: [
-            "pydantic>=2.0",
-            "pydantic-settings",
-            "types-requests",
-            "typer",
-            "lxml"
+          "lxml-stubs",
+          "types-requests",
+          "boto3-stubs[s3]",
+          "types-psycopg2",
+          "types-xmltodict",
+          "pandas-stubs"
         ]
+        files: ^src/
+        args: [--strict]

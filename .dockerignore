@@ -1,0 +1,42 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+.pdm-build/
+.pdm-python
+pdm.lock
+.pdm.toml
+
+# Virtual environment
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDEs and editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Test artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+tests/reports/
+
+# Documentation
+site/
+
+# Secrets
+*.env
+*.secrets
+secrets/
